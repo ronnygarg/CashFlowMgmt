@@ -7,6 +7,8 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from src.constants import DATE_STATUS_PARSED
+
 
 def render_consumption_filters(df: pd.DataFrame, key_prefix: str = "consumption") -> dict[str, Any]:
     """Render sidebar filters for the consumption page."""
@@ -17,6 +19,13 @@ def render_consumption_filters(df: pd.DataFrame, key_prefix: str = "consumption"
     if df.empty:
         st.sidebar.info("No consumption data available.")
         return filters
+
+    if "midnightdate_parse_success" in df.columns:
+        filters["parsed_dates_only"] = st.sidebar.checkbox(
+            "Only parsed dates",
+            value=False,
+            key=f"{key_prefix}_parsed_dates_only",
+        )
 
     date_series = pd.to_datetime(df.get("date"), errors="coerce").dropna()
     if not date_series.empty:
@@ -58,6 +67,10 @@ def apply_consumption_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.D
 
     filtered = df.copy()
 
+    if filters.get("parsed_dates_only") and "midnightdate_parse_success" in filtered.columns:
+        parsed_mask = filtered["midnightdate_parse_success"].fillna(False).astype(bool)
+        filtered = filtered[parsed_mask]
+
     date_range = filters.get("date_range")
     if date_range and len(date_range) == 2 and "date" in filtered.columns:
         start_date = pd.Timestamp(date_range[0])
@@ -85,6 +98,20 @@ def render_vend_filters(df: pd.DataFrame, key_prefix: str = "vend") -> dict[str,
     if df.empty:
         st.sidebar.info("No vend data available.")
         return filters
+
+    if "issuedate_parse_status" in df.columns:
+        parse_status_options = sorted(df["issuedate_parse_status"].dropna().astype(str).unique().tolist())
+        filters["issuedate_parse_status"] = st.sidebar.multiselect(
+            "Issuedate parse status",
+            options=parse_status_options,
+            default=parse_status_options,
+            key=f"{key_prefix}_issuedate_parse_status",
+        )
+        filters["full_datetime_only"] = st.sidebar.checkbox(
+            "Only full datetime rows",
+            value=False,
+            key=f"{key_prefix}_full_datetime_only",
+        )
 
     filters["meterno"] = st.sidebar.multiselect(
         "Meters",
@@ -147,6 +174,14 @@ def apply_vend_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFram
     """Apply sidebar filters to the vend dataframe."""
 
     filtered = df.copy()
+
+    parse_status_values = filters.get("issuedate_parse_status")
+    if parse_status_values and "issuedate_parse_status" in filtered.columns:
+        parse_status_set = {str(value) for value in parse_status_values}
+        filtered = filtered[filtered["issuedate_parse_status"].astype(str).isin(parse_status_set)]
+
+    if filters.get("full_datetime_only") and "issuedate_parse_status" in filtered.columns:
+        filtered = filtered[filtered["issuedate_parse_status"].astype(str) == DATE_STATUS_PARSED]
 
     for column in ("meterno", "servicepointno", "categorycode", "source_file"):
         values = filters.get(column)

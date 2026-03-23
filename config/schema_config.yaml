@@ -17,6 +17,7 @@ datasets:
       - "kvah_consumption"
     primary_date_column: "midnightdate"
     source_file_column: "source_file"
+    categorical_allow_lists: {}
     notes:
       - "Consumption should remain a standalone dataset until a valid bridge exists."
       - "Multiple future monthly consumption files should be supported without code restructuring."
@@ -36,6 +37,7 @@ datasets:
       - "transactionamount"
     primary_date_column: "issuedate"
     source_file_column: "source_file"
+    categorical_allow_lists: {}
     notes:
       - "Issuedate parsing is provisional because source values may be incomplete or time-only."
       - "Do not invent full datetimes when only a time value is supplied."
