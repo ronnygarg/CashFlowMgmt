@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from src.charts import bar_chart, box_plot, histogram, line_chart
-from src.constants import LIMITATION_VEND_DATETIME
+from src.constants import DATE_STATUS_PARSED, LIMITATION_VEND_DATETIME
 from src.dashboard_data import load_dashboard_bundle
 from src.filters import apply_vend_filters, render_vend_filters
 from src.io_utils import dataframe_to_csv_bytes
@@ -42,6 +42,17 @@ def main() -> None:
     filters = render_vend_filters(vend_df, key_prefix="vend_page")
     filtered_df = apply_vend_filters(vend_df, filters)
     metrics = vend_metrics(filtered_df)
+
+    parse_status_series = filtered_df.get("issuedate_parse_status", pd.Series(dtype="string")).astype("string")
+    parsed_rows = int((parse_status_series == DATE_STATUS_PARSED).sum())
+    parse_coverage_pct = (parsed_rows / len(filtered_df) * 100) if len(filtered_df) else 0.0
+    st.caption(f"Parsed full-datetime coverage in current selection: {parse_coverage_pct:.1f}% ({parsed_rows:,}/{len(filtered_df):,})")
+
+    if filters.get("full_datetime_only"):
+        st.info("Quality filter active: only rows with fully parsed vend datetime are included.")
+    selected_parse_statuses = filters.get("issuedate_parse_status")
+    if selected_parse_statuses and len(selected_parse_statuses) > 0:
+        st.caption("Issuedate status filter applied: " + ", ".join(sorted(str(value) for value in selected_parse_statuses)))
 
     if filtered_df.empty:
         st.warning("No vend rows match the current filters.")

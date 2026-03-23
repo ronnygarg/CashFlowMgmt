@@ -41,6 +41,9 @@ def main() -> None:
     filtered_df = apply_consumption_filters(consumption_df, filters)
     metrics = consumption_metrics(filtered_df)
 
+    if filters.get("parsed_dates_only"):
+        st.info("Quality filter active: only rows with parsed consumption dates are included.")
+
     if filtered_df.empty:
         st.warning("No consumption rows match the current filters.")
         return

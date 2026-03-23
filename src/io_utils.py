@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -28,6 +30,47 @@ FILE_INVENTORY_COLUMNS = [
     "column_mapping",
     "parse_warning_count",
 ]
+
+
+def _resolve_duplicate_policy(app_config: Mapping[str, Any]) -> str:
+    """Resolve duplicate handling mode from app config."""
+
+    mode = (
+        app_config.get("quality_checks", {})
+        .get("duplicate_policy", {})
+        .get("mode", "keep_all")
+    )
+    resolved = str(mode).strip().lower()
+    if resolved not in {"keep_all", "drop_first", "drop_last", "error"}:
+        return "keep_all"
+    return resolved
+
+
+def apply_duplicate_policy(df: pd.DataFrame, policy_mode: str) -> tuple[pd.DataFrame, int, int, list[str]]:
+    """Apply duplicate policy and return transformed frame plus diagnostics."""
+
+    if df.empty:
+        return df.copy(), 0, 0, []
+
+    duplicate_rows_before = int(df.duplicated().sum())
+    messages: list[str] = []
+
+    if policy_mode == "drop_first":
+        result = df.drop_duplicates(keep="first").copy()
+    elif policy_mode == "drop_last":
+        result = df.drop_duplicates(keep="last").copy()
+    elif policy_mode == "error":
+        result = df.copy()
+        if duplicate_rows_before > 0:
+            messages.append(
+                "Duplicate policy is set to error and duplicates were detected. "
+                "Rows were preserved; review Data Quality diagnostics."
+            )
+    else:
+        result = df.copy()
+
+    duplicate_rows_after = int(result.duplicated().sum())
+    return result, duplicate_rows_before, duplicate_rows_after, messages
 
 
 def discover_dataset_files(raw_data_dir: Path, app_config: Mapping[str, Any]) -> dict[str, list[Path]]:
@@ -132,6 +175,20 @@ def ingest_dataset_files(
         return empty_dataset_frame(dataset_name, dataset_schema), file_records, messages
 
     combined = pd.concat(frames, ignore_index=True, sort=False)
+    duplicate_policy_mode = _resolve_duplicate_policy(app_config)
+    combined, duplicate_rows_before, duplicate_rows_after, duplicate_messages = apply_duplicate_policy(
+        combined,
+        duplicate_policy_mode,
+    )
+    messages.extend(duplicate_messages)
+    messages.append(
+        f"{dataset_name.title()} duplicate policy '{duplicate_policy_mode}': "
+        f"{duplicate_rows_before:,} duplicate rows before policy, {duplicate_rows_after:,} after policy."
+    )
+
+    for record in file_records:
+        record["duplicate_policy_mode"] = duplicate_policy_mode
+
     return combined, file_records, messages
 
 
@@ -150,6 +207,32 @@ def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
     """Convert a dataframe to UTF-8 CSV bytes for download buttons."""
 
     return df.to_csv(index=False).encode("utf-8")
+
+
+def object_to_json_bytes(payload: Any) -> bytes:
+    """Convert a python object into pretty UTF-8 JSON bytes for downloads."""
+
+    return json.dumps(payload, indent=2, default=str).encode("utf-8")
+
+
+def build_utc_timestamped_filename(prefix: str, generated_at_utc_iso: str, suffix: str = "json") -> str:
+    """Build a UTC-stamped filename from an ISO timestamp.
+
+    The output format is `<prefix>_YYYYMMDDTHHMMSSZ.<suffix>`.
+    """
+
+    iso_text = str(generated_at_utc_iso).strip()
+    if iso_text.endswith("Z"):
+        iso_text = f"{iso_text[:-1]}+00:00"
+
+    parsed = datetime.fromisoformat(iso_text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+
+    stamp = parsed.strftime("%Y%m%dT%H%M%SZ")
+    return f"{prefix}_{stamp}.{suffix}"
 
 
 def ingest_and_persist(

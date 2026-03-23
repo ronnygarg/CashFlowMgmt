@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from typing import Any
 import sys
 from pathlib import Path
 
@@ -14,10 +16,12 @@ import streamlit as st
 
 from src.constants import LIMITATION_NO_LINKING_KEY, LIMITATION_VEND_DATETIME
 from src.dashboard_data import load_dashboard_bundle
+from src.io_utils import build_utc_timestamped_filename, object_to_json_bytes
 from src.path_utils import extract_base_dir_arg, load_app_config
 
 APP_CONFIG = load_app_config()
 DISPLAY_CONFIG = APP_CONFIG.get("display", {})
+QUALITY_EXPORT_SCHEMA_VERSION = "1.0.0"
 
 st.set_page_config(
     page_title=f"{DISPLAY_CONFIG.get('app_title', 'CashFlowMgmt Dashboard')} - Data Quality",
@@ -42,6 +46,67 @@ def _schema_status_row(dataset_name: str, quality: dict[str, object]) -> dict[st
         "missing_columns": ", ".join(schema_report["missing_columns"]) or "None",
         "duplicate_rows": quality["duplicate_rows"],
         "parse_warning_count": parse_warning_count,
+    }
+
+
+def _render_duplicate_diagnostics(quality: dict[str, object], dataset_label: str) -> None:
+    duplicate_details = quality.get("duplicate_diagnostics", {})
+    if not isinstance(duplicate_details, dict):
+        st.info(f"No duplicate diagnostics available for {dataset_label}.")
+        return
+
+    by_source = duplicate_details.get("by_source_file", pd.DataFrame())
+    by_date = duplicate_details.get("by_date", pd.DataFrame())
+
+    st.caption(f"Duplicate diagnostics for {dataset_label}. Rows are not dropped by default policy.")
+
+    if isinstance(by_source, pd.DataFrame) and not by_source.empty:
+        st.markdown("**Duplicate rows by source file**")
+        st.bar_chart(by_source.set_index("label")["duplicate_rows"])
+        st.dataframe(by_source, use_container_width=True, hide_index=True)
+    else:
+        st.info("No duplicated rows detected by source file.")
+
+    if isinstance(by_date, pd.DataFrame) and not by_date.empty:
+        st.markdown("**Duplicate rows by date**")
+        st.line_chart(by_date.set_index("label")["duplicate_rows"])
+        st.dataframe(by_date, use_container_width=True, hide_index=True)
+    else:
+        st.info("No duplicated rows detected by date.")
+
+
+def _to_serializable(value: Any) -> Any:
+    """Recursively convert pandas-heavy objects into JSON-serializable payloads."""
+
+    if isinstance(value, pd.DataFrame):
+        return value.to_dict(orient="records")
+    if isinstance(value, pd.Series):
+        return value.to_list()
+    if isinstance(value, dict):
+        return {str(key): _to_serializable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_to_serializable(item) for item in value]
+    if pd.isna(value):
+        return None
+    return value
+
+
+def _build_quality_export_payload(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Build a schema-versioned payload for quality diagnostics export."""
+
+    generated_at_utc = datetime.now(timezone.utc)
+    return {
+        "schema_version": QUALITY_EXPORT_SCHEMA_VERSION,
+        "generated_at_utc": generated_at_utc.isoformat(),
+        "project": {
+            "name": APP_CONFIG.get("project", {}).get("name", "CashFlowMgmt Dashboard"),
+            "base_dir": str(bundle.get("paths", {}).base_dir) if bundle.get("paths") else None,
+            "base_dir_source": getattr(bundle.get("paths"), "base_dir_source", None),
+        },
+        "quality": {
+            "consumption": _to_serializable(bundle["quality"]["consumption"]),
+            "vend": _to_serializable(bundle["quality"]["vend"]),
+        },
     }
 
 
@@ -83,9 +148,23 @@ def main() -> None:
         )
         st.dataframe(overview_table, use_container_width=True, hide_index=True)
 
+        quality_export_payload = _build_quality_export_payload(bundle)
+        export_file_name = build_utc_timestamped_filename(
+            prefix="quality_diagnostics",
+            generated_at_utc_iso=str(quality_export_payload["generated_at_utc"]),
+        )
+        st.download_button(
+            "Download quality diagnostics JSON",
+            data=object_to_json_bytes(quality_export_payload),
+            file_name=export_file_name,
+            mime="application/json",
+        )
+
     with tabs[1]:
         st.subheader("Consumption Schema")
         st.json(consumption_quality["schema_report"])
+        st.subheader("Duplicate Diagnostics")
+        _render_duplicate_diagnostics(consumption_quality, "Consumption")
         st.subheader("Missing Values")
         st.dataframe(consumption_quality["missing_summary"], use_container_width=True, hide_index=True)
         st.subheader("Parse Summary")
@@ -100,6 +179,8 @@ def main() -> None:
     with tabs[2]:
         st.subheader("Vend Schema")
         st.json(vend_quality["schema_report"])
+        st.subheader("Duplicate Diagnostics")
+        _render_duplicate_diagnostics(vend_quality, "Vend")
         st.subheader("Missing Values")
         st.dataframe(vend_quality["missing_summary"], use_container_width=True, hide_index=True)
         st.subheader("Issuedate Parse Summary")

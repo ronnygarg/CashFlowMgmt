@@ -68,6 +68,8 @@ data:
 
 quality_checks:
   enabled: true
+  duplicate_policy:
+    mode: "keep_all" # keep_all | drop_first | drop_last | error
   basic_checks:
     missing_values: true
     duplicate_rows: true
@@ -77,6 +79,11 @@ quality_checks:
     negative_value_flags: true
     outlier_indicators: true
     source_file_diagnostics: true
+  thresholds:
+    outlier_iqr_multiplier: 1.5
+    temporal_max_future_days: 0
+    stale_data_warning_days: 90
+    vend_full_datetime_warning_pct: 70
   future_rules_placeholder:
     enable_custom_cleaning_rules: false
     enable_threshold_alerts: false

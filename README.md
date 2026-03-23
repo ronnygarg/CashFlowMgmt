@@ -112,6 +112,20 @@ $env:CFM_BASE_DIR = "F:/Secure/CashFlowMgmt"
 streamlit run app/main.py
 ```
 
+## Run tests
+
+Install dependencies (including test dependencies):
+
+```powershell
+pip install -r requirements.txt
+```
+
+Run the unit and smoke test suite from the project root:
+
+```powershell
+pytest
+```
+
 ## What the app does
 
 On load, the app:
@@ -155,6 +169,7 @@ Date parsing is currently configured to interpret ambiguous values with month-fi
 - meter and service-point drill-down
 - source-file inspection
 - raw filtered table with download button
+- quality-aware filters for issuedate parse status and full-datetime-only views
 
 ### Data Quality
 
@@ -171,6 +186,8 @@ It includes:
 - vend datetime warnings
 - column profiling
 - file-level diagnostics
+- duplicate diagnostics charts (by source file and by date)
+- schema-versioned JSON export of quality diagnostics with UTC timestamped filenames
 
 ### Combined Analysis, Future
 
@@ -212,6 +229,26 @@ It does not attempt a fake merge. Instead it documents:
 - Update required or expected fields in [`config/schema_config.yaml`](/f:/Secure/CashFlowMgmt/config/schema_config.yaml).
 - Add any new parsing or derivation logic in [`src/transforms.py`](/f:/Secure/CashFlowMgmt/src/transforms.py).
 - Add new diagnostics in [`src/quality_checks.py`](/f:/Secure/CashFlowMgmt/src/quality_checks.py).
+
+### Configure quality thresholds and duplicate policy
+
+Quality controls are now config-driven through `config/app_config.yaml`.
+
+- `quality_checks.duplicate_policy.mode`
+   - `keep_all` (default): preserve duplicate rows and surface diagnostics
+   - `drop_first`: remove duplicate rows keeping first occurrence
+   - `drop_last`: remove duplicate rows keeping last occurrence
+   - `error`: preserve rows and add an explicit duplicate-policy warning
+- `quality_checks.thresholds.outlier_iqr_multiplier`
+   - controls IQR sensitivity for outlier indicators
+- `quality_checks.thresholds.temporal_max_future_days`
+   - flags rows with parsed dates outside the allowed future window
+- `quality_checks.thresholds.stale_data_warning_days`
+   - warns when latest parsed date appears stale
+- `quality_checks.thresholds.vend_full_datetime_warning_pct`
+   - warning threshold for vend full-datetime parse coverage (charts are still shown)
+
+Optional categorical allow-list checks can be configured per dataset in `config/schema_config.yaml` under `datasets.<name>.categorical_allow_lists`.
 
 ### Change the base folder later
 
