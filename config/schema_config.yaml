@@ -1,0 +1,59 @@
+datasets:
+  consumption:
+    display_name: "Consumption"
+    required_columns:
+      - "mtrid"
+      - "midnightdate"
+      - "kwh_abs"
+      - "kvah_abs"
+      - "kwh_consumption"
+      - "kvah_consumption"
+    candidate_keys:
+      - "mtrid"
+    numeric_columns:
+      - "kwh_abs"
+      - "kvah_abs"
+      - "kwh_consumption"
+      - "kvah_consumption"
+    primary_date_column: "midnightdate"
+    source_file_column: "source_file"
+    notes:
+      - "Consumption should remain a standalone dataset until a valid bridge exists."
+      - "Multiple future monthly consumption files should be supported without code restructuring."
+
+  vend:
+    display_name: "Vend / Recharge"
+    required_columns:
+      - "servicepointno"
+      - "meterno"
+      - "categorycode"
+      - "transactionamount"
+      - "issuedate"
+    candidate_keys:
+      - "servicepointno"
+      - "meterno"
+    numeric_columns:
+      - "transactionamount"
+    primary_date_column: "issuedate"
+    source_file_column: "source_file"
+    notes:
+      - "Issuedate parsing is provisional because source values may be incomplete or time-only."
+      - "Do not invent full datetimes when only a time value is supplied."
+
+standardization:
+  lowercase_columns: true
+  snake_case_columns: true
+  trim_whitespace: true
+
+quality_defaults:
+  outlier_method: "iqr"
+  missing_threshold_warning_pct: 20
+  duplicate_subset_strategy: "full_row_only"
+
+future_combined_analysis:
+  blocked_reason: "No validated common key or bridge table currently exists between the consumption and vend datasets."
+  desired_future_artifacts:
+    - "Meter to service point bridge"
+    - "Customer or account entity table"
+    - "Temporal alignment rules for recharge exhaustion analysis"
+    - "Validated linked analytics model"

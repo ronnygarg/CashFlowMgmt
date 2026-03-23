@@ -1,0 +1,392 @@
+Build a polished but highly modular Python analytics dashboard project for electricity prepayment and consumption analysis.
+
+## Core rules
+- Do not fabricate or force a merge key between consumption and vend datasets.
+- Keep the base directory configurable.
+- Respect the existing starter files:
+  - requirements.txt
+  - config/app_config.yaml
+  - README.md
+- Keep code modular and easy to refactor.
+- Make the Data Quality page prominent.
+- Treat vend datetime parsing as provisional if issuedate is incomplete or time-only.
+
+## Implementation style
+- Prefer reusable functions over monolithic scripts.
+- Include comments, docstrings, and clear TODOs for future combined analysis.
+- Do not hide data limitations.
+
+## Objective
+Create a Streamlit-based multipage dashboard project that ingests CSV files from a configurable project folder, profiles the data, converts clean standardised versions to Parquet, and presents exploratory analysis pages for:
+1. Consumption data
+2. Vend / recharge data
+3. Data quality assessment
+4. Future combined analysis placeholder
+
+This is an early-stage exploratory dashboard for project stakeholders. The design must prioritise:
+- flexibility,
+- easy restructuring,
+- modular code,
+- reusable functions,
+- clear assumptions,
+- future extensibility.
+
+Do NOT over-optimise for the current month only. Build it so future monthly files can be added with minimal code change.
+
+## Base folder requirement
+The default base folder should be:
+
+F:\Secure\CashFlowMgmt
+
+However, this location must be configurable because it may change later.
+
+Implement a clear precedence order for resolving the base folder:
+1. CLI argument, for example `--base-dir`
+2. Environment variable, for example `CFM_BASE_DIR`
+3. Config file value in `config/app_config.yaml`
+4. Fallback default: `F:\Secure\CashFlowMgmt`
+
+Use this base folder to resolve the following subfolders:
+- raw_data/
+- data/processed/
+- config/
+- src/
+- app/
+
+Do not hard-code file paths throughout the codebase. Centralise path resolution in one reusable helper module.
+
+## Expected structure
+- Keep path handling centralised in a reusable helper module.
+- Preserve the multipage Streamlit structure.
+- Save processed outputs as Parquet in data/processed/.
+
+
+## Raw files
+Assume the following files exist under:
+
+<base_dir>\raw_data\
+
+Files:
+- Jan_consumption.csv
+- vend-01Jan-15Jan.csv
+- vend-15Jan-23Jan.csv
+- vend-23Jan-31Jan.csv
+
+The 3 vend files share the same schema and should be combined automatically into one unified vend dataset.
+
+## Known sample schemas
+### Consumption file
+Columns observed in sample:
+- mtrid
+- midnightdate
+- kwh_abs
+- kvah_abs
+- kwh_consumption
+- kvah_consumption
+
+### Vend files
+Columns observed in sample:
+- servicepointno
+- meterno
+- categorycode
+- transactionamount
+- issuedate
+
+## Important business constraints
+1. There is currently NO common key between consumption and vend datasets.
+   - consumption appears keyed by `mtrid`
+   - vend appears to contain `servicepointno` and `meterno`
+2. Therefore, DO NOT attempt a forced merge between the two datasets.
+3. Build a placeholder page for future linked analysis, with TODO notes and architecture hooks for when a mapping table or common key becomes available.
+4. Treat vend datetime parsing as provisional because the sample `issuedate` may contain time-only values instead of full datetimes.
+5. Include data quality and schema diagnostics as a first-class feature.
+6. Leave room to add data cleaning rules later, but do not hard-code aggressive cleaning assumptions now.
+
+## Technology choices
+Use:
+- Python
+- Streamlit
+- pandas
+- Plotly
+- pyarrow
+- PyYAML
+
+## Output requirements
+Create a full project folder with:
+- modular source code
+- reusable functions
+- comments throughout
+- requirements.txt
+- README.md
+- config file(s)
+- sample run instructions
+- error handling
+- assumptions section in README
+- clear TODOs for future combined analysis and data model evolution
+
+## Preferred architecture
+Create a project structure similar to:
+
+<base_dir>/
+  raw_data/
+  data/
+    processed/
+  config/
+    app_config.yaml
+    schema_config.yaml
+  src/
+    __init__.py
+    path_utils.py
+    io_utils.py
+    schema_utils.py
+    profiling.py
+    transforms.py
+    quality_checks.py
+    metrics.py
+    charts.py
+    filters.py
+    constants.py
+  app/
+    main.py
+    pages/
+      01_Overview.py
+      02_Consumption.py
+      03_Vend_Recharge.py
+      04_Data_Quality.py
+      05_Combined_Analysis_Future.py
+  requirements.txt
+  README.md
+
+You may slightly adjust the structure if needed, but keep separation of concerns.
+
+## Functional requirements
+
+### 1. Data ingestion
+- Read all CSV files from `<base_dir>\raw_data\`
+- Automatically identify the single consumption file and all vend files
+- Combine all vend CSVs into one DataFrame
+- Save processed outputs to:
+  - `<base_dir>\data\processed\consumption.parquet`
+  - `<base_dir>\data\processed\vend.parquet`
+- Include helpful logging or user-facing messages when files are missing or malformed
+
+### 2. Schema handling
+- Infer schema from current files, but centralise expected field names in config
+- Standardise column names to lowercase snake_case if helpful
+- Preserve original source columns where useful
+- Validate required columns and report missing columns cleanly
+
+### 3. Date handling
+For consumption:
+- Parse `midnightdate` safely with day-first logic
+- Create useful derived fields such as:
+  - date
+  - month
+  - week
+  - day_of_week
+
+For vend:
+- Attempt to parse `issuedate`
+- If `issuedate` appears to be time-only, preserve it and flag this in data quality results
+- Derive whatever safe temporal fields are possible
+- Add a field indicating the source file name so file-level windowing can be inspected
+- Do NOT invent full datetimes if not present
+- Use clear TODO comments for future improvement
+
+### 4. Dashboard pages
+
+#### Page 1: Overview
+Purpose:
+- provide a project-level landing page
+
+Show:
+- summary cards
+- file counts
+- row counts
+- min/max dates where available
+- number of unique meters / service points where available
+- high-level notes on current limitations
+- a prominent note that combined analysis is not yet reliable without a linking key
+
+#### Page 2: Consumption
+Include tabs such as:
+- Summary
+- Trends
+- Meter drill-down
+- Raw table
+
+Potential content:
+- total kWh consumption
+- total kVAh consumption
+- average daily consumption
+- min / max daily consumption
+- trend charts over time
+- distribution plots
+- top / bottom meters by consumption
+- meter-level drill-down with filters
+- raw data table with download button
+
+Filters:
+- date range
+- mtrid
+- thresholds for consumption
+
+#### Page 3: Vend / Recharge
+Include tabs such as:
+- Summary
+- Transaction analysis
+- Category analysis
+- Meter / service point drill-down
+- Raw table
+
+Potential content:
+- total transaction amount
+- number of vend transactions
+- average transaction amount
+- transaction value distribution
+- categorycode breakdown
+- top meters or service points by vend activity
+- time-of-day analysis if only time is available
+- source-file breakdown
+- raw data table with download button
+
+Filters:
+- meterno
+- servicepointno
+- categorycode
+- transaction amount range
+- source file
+- date or time filters when supported by parsed data
+
+#### Page 4: Data Quality
+This page is critical.
+
+Include:
+- schema comparison
+- missing value summary
+- duplicate counts
+- parse success / failure counts
+- suspicious value checks
+- outlier indicators
+- vend datetime completeness warning
+- column profiling
+- basic anomaly flags
+- file-level diagnostics
+
+Add modular quality checks so future rules can be easily extended.
+
+#### Page 5: Combined Analysis Future
+This page should not attempt a fake merge.
+
+Instead:
+- explain why combined analysis is currently blocked
+- show what keys currently exist in each dataset
+- show a placeholder architecture for future mapping
+- optionally show a mock section with disabled controls and TODO messages
+- include comments about future support for:
+  - common index / mapping table
+  - customer account entity resolution
+  - service point to meter bridge
+  - linked cashflow vs consumption analysis
+  - recharge exhaustion / self-disconnection risk
+
+### 5. UX requirements
+- polished but simple layout
+- clear section titles
+- sidebar filters
+- consistent KPI cards
+- Plotly charts with hover tooltips
+- no cluttered styling
+- keep code easy to refactor
+- use helper functions to avoid repeated layout logic
+
+### 6. State and navigation
+- use a proper multipage Streamlit structure
+- manage shared filter state carefully
+- avoid duplicated logic across pages
+
+### 7. Metrics and derived logic
+Implement only safe metrics that do NOT require linking vend and consumption data.
+
+Consumption examples:
+- total consumption
+- average daily consumption
+- daily trend
+- meter-level ranking
+
+Vend examples:
+- total vend amount
+- transaction count
+- average vend amount
+- category mix
+- time-of-day profile if time parsing is possible
+
+### 8. Error handling
+Include graceful handling for:
+- missing files
+- unexpected columns
+- failed date parsing
+- empty datasets
+- malformed CSVs
+- parquet write issues
+
+### 9. Documentation
+README must include:
+- project purpose
+- folder structure
+- assumptions
+- known data limitations
+- how to run
+- how to change the base folder later
+- how to add future monthly files
+- how to extend schemas
+- how to add future combined analysis once a common key is available
+
+### 10. Code quality
+- clear function boundaries
+- detailed comments
+- docstrings on important functions
+- avoid giant monolithic files
+- no unnecessary complexity
+- use type hints where reasonable
+
+## Config requirements
+Create `config/app_config.yaml` with at least:
+- default_base_dir
+- raw_data_subdir
+- processed_data_subdir
+- supported_file_patterns
+- display labels
+- future placeholders for thresholds and data-quality rules
+
+Create `src/path_utils.py` to:
+- resolve base folder
+- construct subpaths safely using pathlib
+- validate required folders
+- return resolved paths to the rest of the application
+
+## Nice-to-have features
+If straightforward, also include:
+- cached data loading
+- download buttons for filtered tables
+- small config-driven KPI and chart registry
+- file ingest summary table
+- badges or banners for provisional / incomplete fields
+
+## Deliverables
+Return the full code for all project files.
+
+Also ensure:
+- requirements.txt is complete
+- README is usable by a teammate without extra explanation
+- config files are included
+- the app runs locally with a command like:
+  `streamlit run app/main.py`
+- the code can still run if the base folder is moved later and the config or environment variable is updated
+
+## Important reminders
+- Do not fabricate a merge key
+- Do not hide the current data limitations
+- Make the data quality page prominent
+- Preserve future extensibility
+- Build for change

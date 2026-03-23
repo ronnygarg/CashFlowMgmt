@@ -1,0 +1,105 @@
+# Application configuration for the Cash Flow Management dashboard project.
+# Notes:
+# - Use forward slashes for Windows paths to avoid escaping issues.
+# - The default_base_dir is only the fallback location.
+# - Base directory precedence should remain:
+#   1) CLI argument (--base-dir)
+#   2) Environment variable (CFM_BASE_DIR)
+#   3) This config file
+#   4) Hard-coded fallback in code
+
+project:
+  name: "Electricity Consumption and Prepayment Exploration Dashboard"
+  short_name: "CashFlowMgmt Dashboard"
+  owner: "Project stakeholders"
+  environment: "local"
+
+paths:
+  default_base_dir: "F:/Secure/CashFlowMgmt"
+  raw_data_subdir: "raw_data"
+  processed_data_subdir: "data/processed"
+  config_subdir: "config"
+  src_subdir: "src"
+  app_subdir: "app"
+
+supported_file_patterns:
+  consumption:
+    - "*consumption*.csv"
+  vend:
+    - "vend-*.csv"
+
+processed_outputs:
+  consumption_parquet: "consumption.parquet"
+  vend_parquet: "vend.parquet"
+
+display:
+  app_title: "Electricity Consumption and Prepayment Exploration Dashboard"
+  layout: "wide"
+  sidebar_state: "expanded"
+  page_names:
+    overview: "Overview"
+    consumption: "Consumption"
+    vend: "Vend / Recharge"
+    data_quality: "Data Quality"
+    combined_future: "Combined Analysis, Future"
+  labels:
+    consumption_kwh: "Total kWh Consumption"
+    consumption_kvah: "Total kVAh Consumption"
+    vend_amount: "Total Vend Amount"
+    vend_count: "Vend Transaction Count"
+    avg_vend_amount: "Average Vend Amount"
+
+data:
+  expected_datasets:
+    - "consumption"
+    - "vend"
+  known_limitations:
+    - "No common key currently exists between consumption and vend datasets."
+    - "Vend issuedate may be incomplete or time-only in the current source extracts."
+    - "Combined analysis should remain a placeholder until a valid linking key or mapping table is available."
+  date_parsing:
+    consumption:
+      source_column: "midnightdate"
+      dayfirst: false
+    vend:
+      source_column: "issuedate"
+      dayfirst: false
+      treat_as_provisional: true
+
+quality_checks:
+  enabled: true
+  basic_checks:
+    missing_values: true
+    duplicate_rows: true
+    schema_validation: true
+    date_parse_success: true
+    numeric_type_checks: true
+    negative_value_flags: true
+    outlier_indicators: true
+    source_file_diagnostics: true
+  future_rules_placeholder:
+    enable_custom_cleaning_rules: false
+    enable_threshold_alerts: false
+    enable_entity_resolution_checks: false
+
+filters:
+  defaults:
+    max_table_rows: 1000
+    enable_download_buttons: true
+  future_placeholders:
+    consumption_thresholds: {}
+    vend_thresholds: {}
+    anomaly_thresholds: {}
+
+developer_notes:
+  coding_principles:
+    - "Do not fabricate a merge key between vend and consumption."
+    - "Keep path resolution centralised in a reusable helper module."
+    - "Keep data quality visible and prominent."
+    - "Prefer modular functions over monolithic scripts."
+    - "Preserve flexibility for future structural changes."
+  future_backlog:
+    - "Add interval consumption support."
+    - "Add mapping table between mtrid, meterno, and servicepointno."
+    - "Add linked cashflow vs consumption analysis."
+    - "Add anomaly detection and customer risk logic."
