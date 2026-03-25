@@ -95,17 +95,27 @@ def resolve_base_dir(
 
     config = app_config or load_app_config()
     config_paths = config.get("paths", {})
+    root = project_root()
+
+    def _normalize_base_dir(value: str | Path) -> Path:
+        candidate = Path(str(value)).expanduser()
+        if not candidate.is_absolute():
+            candidate = (root / candidate).resolve()
+        return candidate
 
     cli_value = str(cli_base_dir) if cli_base_dir else extract_base_dir_arg(argv)
     env_value = os.getenv(BASE_DIR_ENV_VAR)
     config_value = config_paths.get("default_base_dir")
 
     if cli_value:
-        return Path(cli_value).expanduser(), "cli_argument"
+        return _normalize_base_dir(cli_value), "cli_argument"
     if env_value:
-        return Path(env_value).expanduser(), f"environment_variable:{BASE_DIR_ENV_VAR}"
+        return _normalize_base_dir(env_value), f"environment_variable:{BASE_DIR_ENV_VAR}"
     if config_value:
-        return Path(str(config_value)).expanduser(), "config_file"
+        configured = _normalize_base_dir(config_value)
+        if configured.exists():
+            return configured, "config_file"
+        return root, "config_file_missing_fallback_project_root"
     return DEFAULT_BASE_DIR, "hardcoded_fallback"
 
 

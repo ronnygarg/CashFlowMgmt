@@ -15,7 +15,7 @@ project:
   environment: "local"
 
 paths:
-  default_base_dir: "F:/Secure/CashFlowMgmt"
+  default_base_dir: "."
   raw_data_subdir: "raw_data"
   processed_data_subdir: "data/processed"
   config_subdir: "config"

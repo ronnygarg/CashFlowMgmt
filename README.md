@@ -75,7 +75,7 @@ The application resolves the project base directory in this order:
 1. CLI argument: `--base-dir`
 2. Environment variable: `CFM_BASE_DIR`
 3. Config file value in `config/app_config.yaml`
-4. Hard-coded fallback: `F:/Secure/CashFlowMgmt`
+4. Hard-coded fallback: repository root resolved at runtime
 
 This path is centralised in [`src/path_utils.py`](/f:/Secure/CashFlowMgmt/src/path_utils.py) and used to resolve:
 
@@ -111,6 +111,11 @@ Optional environment variable override:
 $env:CFM_BASE_DIR = "F:/Secure/CashFlowMgmt"
 streamlit run app/main.py
 ```
+
+Default config behavior:
+
+- `paths.default_base_dir` is set to `.` and is resolved relative to the repository root.
+- In hosted environments (for example Streamlit Cloud), this allows the app to run directly from the checked-out repo without machine-specific absolute paths.
 
 ## Run tests
 

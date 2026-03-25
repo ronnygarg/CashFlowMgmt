@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-DEFAULT_BASE_DIR = Path("F:/Secure/CashFlowMgmt")
+# Portable fallback for hosted environments like Streamlit Cloud.
+DEFAULT_BASE_DIR = Path(__file__).resolve().parents[1]
 BASE_DIR_ENV_VAR = "CFM_BASE_DIR"
 
 DATASET_CONSUMPTION = "consumption"
