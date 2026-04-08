@@ -27,11 +27,12 @@ def test_standardize_column_names_returns_mapping() -> None:
 
 
 def test_trim_string_values_only_trims_text_columns() -> None:
-    frame = pd.DataFrame({"name": ["  A  ", " B"], "value": [1, 2]})
+    frame = pd.DataFrame({"name": ["  A  ", "   "], "value": [1, 2]})
 
     trimmed = trim_string_values(frame)
 
-    assert trimmed["name"].tolist() == ["A", "B"]
+    assert trimmed["name"].iloc[0] == "A"
+    assert pd.isna(trimmed["name"].iloc[1])
     assert trimmed["value"].tolist() == [1, 2]
 
 

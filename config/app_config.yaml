@@ -22,13 +22,33 @@ paths:
   src_subdir: "src"
   app_subdir: "app"
 
-supported_file_patterns:
-  consumption:
-    - "*consumption*.csv"
+source_files:
+  consumer_master:
+    preferred_filenames:
+      - "ConsumerMaster20260401.csv"
+    patterns:
+      - "ConsumerMaster*.csv"
   vend:
-    - "vend-*.csv"
+    preferred_filenames:
+      - "VendData20260401.csv"
+    patterns:
+      - "VendData*.csv"
+  consumption:
+    preferred_filenames:
+      - "ConsumptionData20260401.csv"
+    patterns:
+      - "ConsumptionData*.csv"
+
+supported_file_patterns:
+  consumer_master:
+    - "ConsumerMaster*.csv"
+  consumption:
+    - "ConsumptionData*.csv"
+  vend:
+    - "VendData*.csv"
 
 processed_outputs:
+  consumer_master_parquet: "consumer_master.parquet"
   consumption_parquet: "consumption.parquet"
   vend_parquet: "vend.parquet"
 
@@ -37,11 +57,12 @@ display:
   layout: "wide"
   sidebar_state: "expanded"
   page_names:
-    overview: "Overview"
-    consumption: "Consumption"
-    vend: "Vend / Recharge"
-    data_quality: "Data Quality"
-    combined_future: "Combined Analysis, Future"
+    overview: "Executive Overview"
+    consumer_explorer: "Consumer Explorer"
+    vend: "Vending Analysis"
+    consumption: "Consumption Analysis"
+    network: "Network / Spatial"
+    data_quality: "Data Quality & Reconciliation"
   labels:
     consumption_kwh: "Total kWh Consumption"
     consumption_kvah: "Total kVAh Consumption"
@@ -51,13 +72,22 @@ display:
 
 data:
   expected_datasets:
+    - "consumer_master"
     - "consumption"
     - "vend"
   known_limitations:
-    - "No common key currently exists between consumption and vend datasets."
-    - "Vend issuedate may be incomplete or time-only in the current source extracts."
-    - "Combined analysis should remain a placeholder until a valid linking key or mapping table is available."
+    - "Vend and consumption are not directly merged to each other. Both are reconciled against Consumer Master using normalized consumer number and meter number keys."
+    - "Vend issuedate may still be incomplete, date-only, time-only, or mixed in future extracts, so calendar analysis remains quality-gated."
+    - "Unmatched, duplicate-key, and conflicting-key records are surfaced in reconciliation outputs instead of being silently forced into one join path."
+  join_keys:
+    consumer_key: "consumernumber"
+    meter_key: "meterno"
   date_parsing:
+    consumer_master:
+      meterinstallationdate:
+        dayfirst: true
+      balanceupdatedon:
+        dayfirst: true
     consumption:
       source_column: "midnightdate"
       dayfirst: false
@@ -65,6 +95,14 @@ data:
       source_column: "issuedate"
       dayfirst: false
       treat_as_provisional: true
+  risk_thresholds:
+    low_balance: 100
+    critical_balance: 50
+    watch_balance: 250
+    stale_balance_warning_days: 30
+    high_average_daily_kwh: 20
+    high_average_daily_kvah: 20
+    max_map_points: 2000
 
 quality_checks:
   enabled: true
@@ -93,6 +131,16 @@ filters:
   defaults:
     max_table_rows: 1000
     enable_download_buttons: true
+  dimension_columns:
+    - "tariffcode"
+    - "area_type"
+    - "connection_type"
+    - "accountingmode"
+    - "feedercode"
+    - "dtcode"
+    - "substationname"
+    - "metertype"
+    - "supplyvoltage"
   future_placeholders:
     consumption_thresholds: {}
     vend_thresholds: {}
@@ -100,13 +148,13 @@ filters:
 
 developer_notes:
   coding_principles:
-    - "Do not fabricate a merge key between vend and consumption."
+    - "Do not fabricate a direct merge key between vend and consumption."
     - "Keep path resolution centralised in a reusable helper module."
     - "Keep data quality visible and prominent."
     - "Prefer modular functions over monolithic scripts."
     - "Preserve flexibility for future structural changes."
   future_backlog:
     - "Add interval consumption support."
-    - "Add mapping table between mtrid, meterno, and servicepointno."
-    - "Add linked cashflow vs consumption analysis."
-    - "Add anomaly detection and customer risk logic."
+    - "Add a validated bridge between external meter, service point, and internal account identifiers where required."
+    - "Add linked cashflow vs consumption analysis with documented join-confidence tiers."
+    - "Refine operational exception thresholds with stakeholder input."

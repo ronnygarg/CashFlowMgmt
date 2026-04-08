@@ -76,3 +76,19 @@ def box_plot(df: pd.DataFrame, y: str, title: str, color: str | None = None) -> 
         return empty_figure("No data available for this chart.")
     fig = px.box(df, y=y, color=color, points="outliers")
     return style_figure(fig, title)
+
+
+def scatter_chart(
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    title: str,
+    color: str | None = None,
+    hover_name: str | None = None,
+) -> go.Figure:
+    """Create a reusable scatter chart."""
+
+    if df.empty or x not in df.columns or y not in df.columns:
+        return empty_figure("No data available for this chart.")
+    fig = px.scatter(df, x=x, y=y, color=color, hover_name=hover_name)
+    return style_figure(fig, title)

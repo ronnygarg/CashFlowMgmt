@@ -1,37 +1,24 @@
 import pandas as pd
 
-from src.constants import DATE_STATUS_FAILED, DATE_STATUS_PARSED, DATE_STATUS_TIME_ONLY
-from src.filters import apply_consumption_filters, apply_vend_filters
+from src.filters import apply_dimension_filters
 
 
-def test_apply_consumption_filters_parsed_dates_only() -> None:
+def test_apply_dimension_filters_categorical_and_date() -> None:
     df = pd.DataFrame(
         {
-            "mtrid": ["M1", "M2"],
-            "midnightdate_parse_success": [True, False],
-            "kwh_consumption": [1.0, 2.0],
+            "tariffcode": ["A", "B", "A"],
+            "date": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"]),
         }
     )
 
-    filtered = apply_consumption_filters(df, {"parsed_dates_only": True})
+    filtered = apply_dimension_filters(
+        df,
+        {
+            "tariffcode": ["A"],
+            "date_column": "date",
+            "date_range": (pd.Timestamp("2026-01-01").date(), pd.Timestamp("2026-01-02").date()),
+        },
+    )
 
     assert len(filtered) == 1
-    assert filtered["mtrid"].iloc[0] == "M1"
-
-
-def test_apply_vend_filters_parse_status_and_full_datetime() -> None:
-    df = pd.DataFrame(
-        {
-            "meterno": ["M1", "M2", "M3"],
-            "issuedate_parse_status": [DATE_STATUS_PARSED, DATE_STATUS_TIME_ONLY, DATE_STATUS_FAILED],
-            "transactionamount": [10, 20, 30],
-        }
-    )
-
-    filtered_status = apply_vend_filters(df, {"issuedate_parse_status": [DATE_STATUS_PARSED, DATE_STATUS_TIME_ONLY]})
-    filtered_full = apply_vend_filters(df, {"full_datetime_only": True})
-
-    assert len(filtered_status) == 2
-    assert set(filtered_status["issuedate_parse_status"].tolist()) == {DATE_STATUS_PARSED, DATE_STATUS_TIME_ONLY}
-    assert len(filtered_full) == 1
-    assert filtered_full["issuedate_parse_status"].iloc[0] == DATE_STATUS_PARSED
+    assert filtered["tariffcode"].iloc[0] == "A"

@@ -1,210 +1,87 @@
-"""Streamlit filter widgets and dataframe filter logic."""
+"""Reusable Streamlit filters for dashboard pages."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 import streamlit as st
 
-from src.constants import DATE_STATUS_PARSED
+
+def _unique_options(df: pd.DataFrame, column: str) -> list[str]:
+    if column not in df.columns or df.empty:
+        return []
+    return sorted(df[column].dropna().astype("string").drop_duplicates().tolist())
 
 
-def render_consumption_filters(df: pd.DataFrame, key_prefix: str = "consumption") -> dict[str, Any]:
-    """Render sidebar filters for the consumption page."""
+def render_dimension_filters(
+    df: pd.DataFrame,
+    app_config: Mapping[str, Any],
+    key_prefix: str,
+    title: str,
+    date_column: str | None = None,
+    date_label: str = "Date range",
+    extra_columns: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Render shared categorical and date filters for dashboard pages."""
 
     filters: dict[str, Any] = {}
-    st.sidebar.subheader("Consumption Filters")
+    st.sidebar.subheader(title)
 
     if df.empty:
-        st.sidebar.info("No consumption data available.")
+        st.sidebar.info("No rows are available for this view.")
         return filters
 
-    if "midnightdate_parse_success" in df.columns:
-        filters["parsed_dates_only"] = st.sidebar.checkbox(
-            "Only parsed dates",
-            value=False,
-            key=f"{key_prefix}_parsed_dates_only",
-        )
+    if date_column and date_column in df.columns:
+        date_series = pd.to_datetime(df[date_column], errors="coerce").dropna()
+        if not date_series.empty:
+            min_date = date_series.min().date()
+            max_date = date_series.max().date()
+            filters["date_column"] = date_column
+            filters["date_range"] = st.sidebar.date_input(
+                date_label,
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date,
+                key=f"{key_prefix}_{date_column}_range",
+            )
 
-    date_series = pd.to_datetime(df.get("date"), errors="coerce").dropna()
-    if not date_series.empty:
-        min_date = date_series.min().date()
-        max_date = date_series.max().date()
-        filters["date_range"] = st.sidebar.date_input(
-            "Date range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date,
-            key=f"{key_prefix}_date_range",
-        )
-
-    meter_options = sorted(df.get("mtrid", pd.Series(dtype="string")).dropna().astype(str).unique().tolist())
-    filters["mtrid"] = st.sidebar.multiselect(
-        "Meters",
-        options=meter_options,
-        key=f"{key_prefix}_mtrid",
-    )
-
-    if "kwh_consumption" in df.columns:
-        series = pd.to_numeric(df["kwh_consumption"], errors="coerce")
-        min_value = float(series.min(skipna=True) if not series.dropna().empty else 0.0)
-        max_value = float(series.max(skipna=True) if not series.dropna().empty else 0.0)
-        slider_max = max_value if max_value > min_value else min_value + 1.0
-        filters["kwh_range"] = st.sidebar.slider(
-            "kWh consumption range",
-            min_value=min_value,
-            max_value=slider_max,
-            value=(min_value, slider_max),
-            key=f"{key_prefix}_kwh_range",
+    configured_dimensions = list(app_config.get("filters", {}).get("dimension_columns", []))
+    dimension_columns = configured_dimensions + list(extra_columns or [])
+    for column in dict.fromkeys(dimension_columns):
+        options = _unique_options(df, column)
+        if not options:
+            continue
+        label = column.replace("_", " ").title()
+        filters[column] = st.sidebar.multiselect(
+            label,
+            options=options,
+            key=f"{key_prefix}_{column}",
         )
 
     return filters
 
 
-def apply_consumption_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
-    """Apply sidebar filters to the consumption dataframe."""
+def apply_dimension_filters(df: pd.DataFrame, filters: Mapping[str, Any]) -> pd.DataFrame:
+    """Apply the shared filters returned by render_dimension_filters."""
 
     filtered = df.copy()
+    if filtered.empty:
+        return filtered
 
-    if filters.get("parsed_dates_only") and "midnightdate_parse_success" in filtered.columns:
-        parsed_mask = filtered["midnightdate_parse_success"].fillna(False).astype(bool)
-        filtered = filtered[parsed_mask]
-
+    date_column = filters.get("date_column")
     date_range = filters.get("date_range")
-    if date_range and len(date_range) == 2 and "date" in filtered.columns:
+    if date_column and date_range and len(date_range) == 2 and date_column in filtered.columns:
         start_date = pd.Timestamp(date_range[0])
         end_date = pd.Timestamp(date_range[1])
-        filtered = filtered[filtered["date"].between(start_date, end_date)]
+        parsed_dates = pd.to_datetime(filtered[date_column], errors="coerce")
+        filtered = filtered[parsed_dates.between(start_date, end_date, inclusive="both")]
 
-    if filters.get("mtrid"):
-        meter_values = {str(value) for value in filters["mtrid"]}
-        filtered = filtered[filtered["mtrid"].astype(str).isin(meter_values)]
-
-    if filters.get("kwh_range") and "kwh_consumption" in filtered.columns:
-        low, high = filters["kwh_range"]
-        series = pd.to_numeric(filtered["kwh_consumption"], errors="coerce")
-        filtered = filtered[series.between(low, high, inclusive="both")]
-
-    return filtered
-
-
-def render_vend_filters(df: pd.DataFrame, key_prefix: str = "vend") -> dict[str, Any]:
-    """Render sidebar filters for the vend page."""
-
-    filters: dict[str, Any] = {}
-    st.sidebar.subheader("Vend Filters")
-
-    if df.empty:
-        st.sidebar.info("No vend data available.")
-        return filters
-
-    if "issuedate_parse_status" in df.columns:
-        parse_status_options = sorted(df["issuedate_parse_status"].dropna().astype(str).unique().tolist())
-        filters["issuedate_parse_status"] = st.sidebar.multiselect(
-            "Issuedate parse status",
-            options=parse_status_options,
-            default=parse_status_options,
-            key=f"{key_prefix}_issuedate_parse_status",
-        )
-        filters["full_datetime_only"] = st.sidebar.checkbox(
-            "Only full datetime rows",
-            value=False,
-            key=f"{key_prefix}_full_datetime_only",
-        )
-
-    filters["meterno"] = st.sidebar.multiselect(
-        "Meters",
-        options=sorted(df.get("meterno", pd.Series(dtype="string")).dropna().astype(str).unique().tolist()),
-        key=f"{key_prefix}_meterno",
-    )
-    filters["servicepointno"] = st.sidebar.multiselect(
-        "Service points",
-        options=sorted(df.get("servicepointno", pd.Series(dtype="string")).dropna().astype(str).unique().tolist()),
-        key=f"{key_prefix}_servicepointno",
-    )
-    filters["categorycode"] = st.sidebar.multiselect(
-        "Category codes",
-        options=sorted(df.get("categorycode", pd.Series(dtype="string")).dropna().astype(str).unique().tolist()),
-        key=f"{key_prefix}_categorycode",
-    )
-    filters["source_file"] = st.sidebar.multiselect(
-        "Source files",
-        options=sorted(df.get("source_file", pd.Series(dtype="string")).dropna().astype(str).unique().tolist()),
-        key=f"{key_prefix}_source_file",
-    )
-
-    if "transactionamount" in df.columns:
-        series = pd.to_numeric(df["transactionamount"], errors="coerce")
-        min_amount = float(series.min(skipna=True) if not series.dropna().empty else 0.0)
-        max_amount = float(series.max(skipna=True) if not series.dropna().empty else 0.0)
-        slider_max = max_amount if max_amount > min_amount else min_amount + 1.0
-        filters["transaction_range"] = st.sidebar.slider(
-            "Transaction amount range",
-            min_value=min_amount,
-            max_value=slider_max,
-            value=(min_amount, slider_max),
-            key=f"{key_prefix}_transaction_range",
-        )
-
-    parsed_dates = pd.to_datetime(df.get("vend_date"), errors="coerce").dropna()
-    if not parsed_dates.empty:
-        min_date = parsed_dates.min().date()
-        max_date = parsed_dates.max().date()
-        filters["date_range"] = st.sidebar.date_input(
-            "Vend date range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date,
-            key=f"{key_prefix}_date_range",
-        )
-
-    analysis_hours = sorted(pd.to_numeric(df.get("analysis_hour"), errors="coerce").dropna().astype(int).unique().tolist())
-    if analysis_hours:
-        filters["analysis_hours"] = st.sidebar.multiselect(
-            "Analysis hours",
-            options=analysis_hours,
-            key=f"{key_prefix}_analysis_hours",
-        )
-
-    return filters
-
-
-def apply_vend_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
-    """Apply sidebar filters to the vend dataframe."""
-
-    filtered = df.copy()
-
-    parse_status_values = filters.get("issuedate_parse_status")
-    if parse_status_values and "issuedate_parse_status" in filtered.columns:
-        parse_status_set = {str(value) for value in parse_status_values}
-        filtered = filtered[filtered["issuedate_parse_status"].astype(str).isin(parse_status_set)]
-
-    if filters.get("full_datetime_only") and "issuedate_parse_status" in filtered.columns:
-        filtered = filtered[filtered["issuedate_parse_status"].astype(str) == DATE_STATUS_PARSED]
-
-    for column in ("meterno", "servicepointno", "categorycode", "source_file"):
-        values = filters.get(column)
-        if values and column in filtered.columns:
+    for column, values in filters.items():
+        if column in {"date_column", "date_range"}:
+            continue
+        if column in filtered.columns and values:
             value_set = {str(value) for value in values}
-            filtered = filtered[filtered[column].astype(str).isin(value_set)]
-
-    if filters.get("transaction_range") and "transactionamount" in filtered.columns:
-        low, high = filters["transaction_range"]
-        series = pd.to_numeric(filtered["transactionamount"], errors="coerce")
-        filtered = filtered[series.between(low, high, inclusive="both")]
-
-    date_range = filters.get("date_range")
-    if date_range and len(date_range) == 2 and "vend_date" in filtered.columns:
-        start_date = pd.Timestamp(date_range[0])
-        end_date = pd.Timestamp(date_range[1])
-        vend_dates = pd.to_datetime(filtered["vend_date"], errors="coerce")
-        filtered = filtered[vend_dates.between(start_date, end_date)]
-
-    if filters.get("analysis_hours") and "analysis_hour" in filtered.columns:
-        hours = set(filters["analysis_hours"])
-        analysis_hour = pd.to_numeric(filtered["analysis_hour"], errors="coerce").astype("Int64")
-        filtered = filtered[analysis_hour.isin(hours)]
+            filtered = filtered[filtered[column].astype("string").isin(value_set)]
 
     return filtered
-

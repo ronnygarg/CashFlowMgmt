@@ -1,8 +1,14 @@
 import json
+from pathlib import Path
 
 import pandas as pd
 
-from src.io_utils import apply_duplicate_policy, build_utc_timestamped_filename, object_to_json_bytes
+from src.io_utils import (
+    apply_duplicate_policy,
+    build_utc_timestamped_filename,
+    load_processed_datasets,
+    object_to_json_bytes,
+)
 
 
 def test_apply_duplicate_policy_keep_all_preserves_duplicates() -> None:
@@ -63,3 +69,29 @@ def test_build_utc_timestamped_filename_handles_z_suffix() -> None:
     )
 
     assert file_name == "quality_diagnostics_20260323T153412Z.json"
+
+
+def test_load_processed_datasets_returns_bundle_when_all_parquets_exist(tmp_path: Path) -> None:
+    processed_dir = tmp_path / "data" / "processed"
+    processed_dir.mkdir(parents=True)
+
+    pd.DataFrame({"consumernumber": ["1"]}).to_parquet(processed_dir / "consumer_master.parquet", index=False)
+    pd.DataFrame({"consumernumber": ["1"]}).to_parquet(processed_dir / "consumption.parquet", index=False)
+    pd.DataFrame({"consumernumber": ["1"]}).to_parquet(processed_dir / "vend.parquet", index=False)
+
+    bundle = load_processed_datasets(
+        paths=type("Paths", (), {"processed_data_dir": processed_dir})(),
+        app_config={
+            "data": {"expected_datasets": ["consumer_master", "consumption", "vend"]},
+            "processed_outputs": {
+                "consumer_master_parquet": "consumer_master.parquet",
+                "consumption_parquet": "consumption.parquet",
+                "vend_parquet": "vend.parquet",
+            },
+        },
+        schema_config={"datasets": {}},
+    )
+
+    assert bundle is not None
+    assert bundle["load_mode"] == "processed_parquet"
+    assert set(bundle["datasets"].keys()) == {"consumer_master", "consumption", "vend"}

@@ -1,15 +1,47 @@
 datasets:
+  consumer_master:
+    display_name: "Consumer Master"
+    required_columns:
+      - "consumername"
+      - "consumernumber"
+      - "meterno"
+      - "tariffcode"
+      - "accountingmode"
+      - "connectionstatus"
+      - "meterinstallationdate"
+      - "meterbalance"
+      - "balanceupdatedon"
+      - "billingunit"
+      - "connection_type"
+      - "area_type"
+    candidate_keys:
+      - "consumernumber"
+      - "meterno"
+    numeric_columns:
+      - "meterbalance"
+      - "contract_demand"
+      - "gis_latitude"
+      - "gis_longitude"
+    primary_date_column: "balanceupdatedon"
+    source_file_column: "source_file"
+    categorical_allow_lists: {}
+    notes:
+      - "Consumer Master is the primary reference table for customer context, balances, and reconciliation."
+      - "Use normalized consumer number and meter number keys for matching; preserve raw source values for diagnostics."
+
   consumption:
     display_name: "Consumption"
     required_columns:
-      - "mtrid"
+      - "consumernumber"
+      - "meterno"
       - "midnightdate"
       - "kwh_abs"
       - "kvah_abs"
       - "kwh_consumption"
       - "kvah_consumption"
     candidate_keys:
-      - "mtrid"
+      - "consumernumber"
+      - "meterno"
     numeric_columns:
       - "kwh_abs"
       - "kvah_abs"
@@ -25,13 +57,12 @@ datasets:
   vend:
     display_name: "Vend / Recharge"
     required_columns:
-      - "servicepointno"
+      - "consumernumber"
       - "meterno"
-      - "categorycode"
       - "transactionamount"
       - "issuedate"
     candidate_keys:
-      - "servicepointno"
+      - "consumernumber"
       - "meterno"
     numeric_columns:
       - "transactionamount"
@@ -39,7 +70,7 @@ datasets:
     source_file_column: "source_file"
     categorical_allow_lists: {}
     notes:
-      - "Issuedate parsing is provisional because source values may be incomplete or time-only."
+      - "Issuedate parsing is provisional because source values may be full datetime, date only, time only, or mixed."
       - "Do not invent full datetimes when only a time value is supplied."
 
 standardization:
@@ -53,9 +84,9 @@ quality_defaults:
   duplicate_subset_strategy: "full_row_only"
 
 future_combined_analysis:
-  blocked_reason: "No validated common key or bridge table currently exists between the consumption and vend datasets."
+  blocked_reason: "Vend and consumption should not be directly joined to each other. Both should be reconciled independently against Consumer Master using normalized consumer number and meter number keys, with confidence and ambiguity surfaced explicitly."
   desired_future_artifacts:
-    - "Meter to service point bridge"
-    - "Customer or account entity table"
+    - "Documented entity-resolution confidence framework"
+    - "Validated bridge assets where external identifiers diverge"
     - "Temporal alignment rules for recharge exhaustion analysis"
     - "Validated linked analytics model"

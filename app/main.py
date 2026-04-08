@@ -14,7 +14,6 @@ import streamlit as st
 
 from src.constants import LIMITATION_NO_LINKING_KEY, LIMITATION_VEND_DATETIME
 from src.dashboard_data import clear_dashboard_cache, load_dashboard_bundle
-from src.metrics import overview_metrics
 from src.path_utils import extract_base_dir_arg, load_app_config
 
 APP_CONFIG = load_app_config()
@@ -34,6 +33,7 @@ def render_sidebar_controls() -> str | None:
     base_dir_arg = extract_base_dir_arg()
 
     if st.sidebar.button("Refresh Raw Ingestion", use_container_width=True):
+        st.session_state["force_raw_refresh"] = True
         clear_dashboard_cache()
         st.rerun()
 
@@ -48,84 +48,99 @@ def main() -> None:
     """Render the dashboard landing page."""
 
     base_dir_arg = render_sidebar_controls()
-    bundle = load_dashboard_bundle(base_dir_override=base_dir_arg)
-    metrics = overview_metrics(
-        consumption_df=bundle["datasets"]["consumption"],
-        vend_df=bundle["datasets"]["vend"],
-        file_inventory=bundle["file_inventory"],
-    )
+    force_raw_refresh = bool(st.session_state.get("force_raw_refresh", False))
+    bundle = load_dashboard_bundle(base_dir_override=base_dir_arg, force_raw_refresh=force_raw_refresh)
+    if force_raw_refresh:
+        st.session_state["force_raw_refresh"] = False
+    portfolio_metrics = bundle["derived"]["portfolio_metrics"]
+    exception_summary = bundle["derived"]["exception_summary"]
+    vend_timestamp_quality = bundle["derived"]["vend_timestamp_quality"]
 
     st.title(DISPLAY_CONFIG.get("app_title", "CashFlowMgmt Dashboard"))
-    st.caption("Exploratory dashboard for electricity consumption and vend analysis with modular ingestion and first-class data quality diagnostics.")
+    st.caption(
+        "Operational dashboard for consumer portfolio context, recharge behaviour, daily consumption, "
+        "reconciliation quality, and practical exception monitoring."
+    )
 
     st.warning(LIMITATION_NO_LINKING_KEY)
     st.info(LIMITATION_VEND_DATETIME)
+    st.info(vend_timestamp_quality["note"])
 
     if hasattr(st, "page_link"):
-        links = st.columns(3)
+        links = st.columns(4)
         with links[0]:
-            st.page_link("pages/01_Overview.py", label="Open Overview")
+            st.page_link("pages/01_Executive_Overview.py", label="Executive Overview")
         with links[1]:
-            st.page_link("pages/04_Data_Quality.py", label="Start with Data Quality")
+            st.page_link("pages/02_Consumer_Explorer.py", label="Consumer Explorer")
         with links[2]:
-            st.page_link("pages/05_Combined_Analysis_Future.py", label="See Combined Analysis Placeholder")
+            st.page_link("pages/03_Vending_Analysis.py", label="Vending Analysis")
+        with links[3]:
+            st.page_link("pages/06_Data_Quality_Reconciliation.py", label="Data Quality")
 
     if bundle.get("missing_directories"):
         st.error("Some expected project directories are missing.")
-        st.dataframe(pd.DataFrame({"missing_path": bundle["missing_directories"]}), use_container_width=True, hide_index=True)
+        st.dataframe(
+            pd.DataFrame({"missing_path": bundle["missing_directories"]}),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     for message in bundle.get("messages", []):
         if message.startswith("Failed"):
             st.error(message)
         elif message.startswith("No valid"):
             st.warning(message)
-        else:
-            st.success(message)
 
-    top_metrics = st.columns(4)
-    top_metrics[0].metric("Raw files discovered", f"{metrics['file_count']:,}")
-    top_metrics[1].metric("Consumption rows", f"{metrics['consumption']['rows']:,}")
-    top_metrics[2].metric("Vend rows", f"{metrics['vend']['rows']:,}")
-    top_metrics[3].metric("Base dir source", bundle["paths"].base_dir_source.replace("_", " "))
+    top_metrics = st.columns(6)
+    top_metrics[0].metric("Master consumers", f"{portfolio_metrics['total_consumers_in_master']:,}")
+    top_metrics[1].metric("Master meters", f"{portfolio_metrics['total_distinct_meters_in_master']:,}")
+    top_metrics[2].metric("Vend transactions", f"{portfolio_metrics['total_vend_transactions']:,}")
+    top_metrics[3].metric("Consumption rows", f"{portfolio_metrics['total_consumption_rows']:,}")
+    top_metrics[4].metric("Vend match rate", f"{portfolio_metrics['vend_match_rate_pct']:.1f}%")
+    top_metrics[5].metric("Consumption match rate", f"{portfolio_metrics['consumption_match_rate_pct']:.1f}%")
 
     detail_metrics = st.columns(4)
-    detail_metrics[0].metric("Consumption files", f"{metrics['consumption_files']:,}")
-    detail_metrics[1].metric("Vend files", f"{metrics['vend_files']:,}")
-    detail_metrics[2].metric("Unique consumption meters", f"{metrics['consumption']['unique_meters']:,}")
-    detail_metrics[3].metric("Unique vend service points", f"{metrics['vend']['unique_service_points']:,}")
+    detail_metrics[0].metric("Consumers with vend", f"{portfolio_metrics['consumers_with_vend_records']:,}")
+    detail_metrics[1].metric("Consumers with consumption", f"{portfolio_metrics['consumers_with_consumption_records']:,}")
+    detail_metrics[2].metric("Consumers with GIS", f"{portfolio_metrics['consumers_with_gis']:,}")
+    detail_metrics[3].metric(
+        "Critical balance exceptions",
+        f"{int(exception_summary.loc[exception_summary['exception_type'] == 'Critical balance customers', 'consumer_count'].sum()):,}",
+    )
 
-    status_col, path_col = st.columns([1, 1])
-    with status_col:
+    current_run, next_steps = st.columns([1.1, 0.9])
+    with current_run:
         st.subheader("Current Run")
         st.dataframe(
             pd.DataFrame(
                 [
                     {"setting": "Resolved base directory", "value": str(bundle["paths"].base_dir)},
                     {"setting": "Base directory source", "value": bundle["paths"].base_dir_source},
-                    {"setting": "Consumption output", "value": bundle["processed_outputs"]["consumption"]},
+                    {"setting": "Load mode", "value": bundle.get("load_mode", "unknown")},
+                    {"setting": "Consumer Master output", "value": bundle["processed_outputs"]["consumer_master"]},
                     {"setting": "Vend output", "value": bundle["processed_outputs"]["vend"]},
+                    {"setting": "Consumption output", "value": bundle["processed_outputs"]["consumption"]},
                 ]
             ),
             use_container_width=True,
             hide_index=True,
         )
 
-    with path_col:
-        st.subheader("Next Steps")
+    with next_steps:
+        st.subheader("Recommended Flow")
         st.markdown(
             "\n".join(
                 [
-                    "- Use the Overview page for project-level context and ingest summaries.",
-                    "- Use the Data Quality page early. It is the best place to inspect schema, parse coverage, and current limitations.",
-                    "- Keep combined analysis disabled until a validated bridge table or common key becomes available.",
+                    "- Start with Executive Overview for portfolio health, join coverage, and exception counts.",
+                    "- Use Consumer Explorer for account-level diagnostics across master, vend, and consumption.",
+                    "- Use Data Quality early if you need to validate missing keys, duplicate identifiers, or timestamp quality.",
                 ]
             )
         )
 
-    st.subheader("File Inventory")
+    st.subheader("Source Files in Use")
     st.dataframe(bundle["file_inventory"], use_container_width=True, hide_index=True)
 
 
 if __name__ == "__main__":
     main()
-

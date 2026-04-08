@@ -2,88 +2,149 @@
 
 ## Purpose
 
-This project is a modular Streamlit dashboard for early-stage exploratory analysis of:
+This project is a modular Streamlit dashboard for stakeholder demos and operational analysis across:
 
-- electricity consumption data
-- electricity prepayment vend / recharge transactions
-- source-data quality and schema diagnostics
+- consumer master / account context
+- recharge / vend behaviour
+- daily consumption behaviour
+- join coverage and reconciliation quality
+- practical risk and exception monitoring
+- network and location drill-downs where the source data supports them
 
-The dashboard is designed for change. It prioritises configurable paths, modular source code, reusable functions, and explicit handling of current data limitations.
+The app remains deliberately honest about source quality. It does not force a direct vend-to-consumption merge. Instead, both datasets are reconciled independently against `ConsumerMaster20260401.csv` using normalized `consumernumber` and `meterno` keys.
 
-## Core constraints
+The dashboard can now start from processed Parquet outputs in [`data/processed`](/f:/Secure/CashFlowMgmt/data/processed) when raw CSV files are not present locally. Raw ingestion is only required to rebuild or refresh those processed outputs.
 
-- Do not fabricate or force a merge key between consumption and vend datasets.
-- Do not hide data limitations.
-- Keep the base directory configurable.
-- Keep the Data Quality page prominent.
-- Treat vend `issuedate` parsing as provisional when source values are incomplete or time-only.
+## Current source files
 
-## Project structure
+The dashboard is configured to look under `<base_dir>/raw_data/` and prefer these exact files when present:
 
-```text
-F:\Secure\CashFlowMgmt\
-|-- app\
-|   |-- main.py
-|   `-- pages\
-|       |-- 01_Overview.py
-|       |-- 02_Consumption.py
-|       |-- 03_Vend_Recharge.py
-|       |-- 04_Data_Quality.py
-|       `-- 05_Combined_Analysis_Future.py
-|-- config\
-|   |-- app_config.yaml
-|   `-- schema_config.yaml
-|-- data\
-|   `-- processed\
-|-- raw_data\
-|-- src\
-|   |-- __init__.py
-|   |-- charts.py
-|   |-- constants.py
-|   |-- dashboard_data.py
-|   |-- filters.py
-|   |-- io_utils.py
-|   |-- metrics.py
-|   |-- path_utils.py
-|   |-- profiling.py
-|   |-- quality_checks.py
-|   |-- schema_utils.py
-|   `-- transforms.py
-|-- requirements.txt
-`-- README.md
-```
+- `ConsumerMaster20260401.csv`
+- `VendData20260401.csv`
+- `ConsumptionData20260401.csv`
 
-## Raw data expectations
+Fallback filename patterns are configured in [`config/app_config.yaml`](/f:/Secure/CashFlowMgmt/config/app_config.yaml) so the data layer can still evolve without hard-coding paths in Python.
 
-The dashboard expects CSV files under `<base_dir>/raw_data/`.
+## What changed in `dashboardv2`
 
-Current sample files:
+- Added a third core dataset: Consumer Master.
+- Reworked ingestion to support `consumer_master`, `vend`, and `consumption`.
+- Added safe normalized join keys for `consumernumber` and `meterno`.
+- Persisted transformed datasets to Parquet under [`data/processed`](/f:/Secure/CashFlowMgmt/data/processed).
+- Replaced the old standalone-only dashboard flow with pages for:
+  - Executive Overview
+  - Consumer Explorer
+  - Vending Analysis
+  - Consumption Analysis
+  - Network / Spatial View
+  - Data Quality & Reconciliation
+- Added conservative join coverage and resolution statuses instead of silently forcing matches.
+- Added exception logic for low balance, missing activity, missing network/GIS fields, and consumption-versus-vend gaps.
 
-- `Jan_consumption.csv`
-- `vend-01Jan-15Jan.csv`
-- `vend-15Jan-23Jan.csv`
-- `vend-23Jan-31Jan.csv`
+## Join logic
 
-The vend files are automatically discovered and combined into one unified vend dataset.
+Join handling is intentionally conservative.
 
-The ingestion flow is also designed to tolerate future monthly file additions with minimal code change, especially for new CSVs that continue to match the configured filename patterns.
+1. Raw key columns are read as strings.
+2. Internal normalized keys are built for:
+   - `consumernumber`
+   - `meterno`
+3. Normalization rules:
+   - trim whitespace
+   - treat blank and null-like text as missing
+   - safely convert scientific notation using `Decimal`
+   - remove trailing `.0` when the value is a whole number
+   - preserve non-empty non-numeric text after trimming
+4. Vend and consumption are each reconciled to Consumer Master using normalized keys.
+5. Coverage categories are surfaced as:
+   - `both_keys_matched`
+   - `consumer_only_matched`
+   - `meter_only_matched`
+   - `unmatched`
+6. Resolution is stricter than coverage and may still be:
+   - `resolved_both_keys`
+   - `resolved_consumer_key`
+   - `resolved_meter_key`
+   - `conflicting_keys`
+   - `duplicate_master_key`
+   - `unresolved`
 
-## Base directory precedence
+This means a row can show some key coverage without being silently assigned a high-confidence master record.
 
-The application resolves the project base directory in this order:
+## Timestamp handling
 
-1. CLI argument: `--base-dir`
-2. Environment variable: `CFM_BASE_DIR`
-3. Config file value in `config/app_config.yaml`
-4. Hard-coded fallback: `F:/Secure/CashFlowMgmt`
+The app inspects and preserves timestamp quality rather than inventing precision.
 
-This path is centralised in [`src/path_utils.py`](/f:/Secure/CashFlowMgmt/src/path_utils.py) and used to resolve:
+- `meterinstallationdate`: parsed defensively from observed formats such as `11-Mar-2025`
+- `balanceupdatedon`: parsed defensively from observed formats such as `25-Mar-26 00:00`
+- `midnightdate`: parsed from daily datetime values such as `2026-01-01 00:00:00`
+- `issuedate`: classified as full datetime, date only, time only, missing, or failed
 
-- `raw_data/`
-- `data/processed/`
-- `config/`
-- `src/`
-- `app/`
+Vend analysis is quality-gated:
+
+- full datetime: daily and intraday analysis are allowed
+- date only: daily analysis is allowed, intraday is not
+- time only: time-of-day analysis is allowed, calendar trends are not
+- mixed or weak quality: the UI surfaces warnings and falls back to safer views
+
+## Dashboard pages
+
+### Executive Overview
+
+- KPI tiles
+- join coverage summary
+- balance distribution
+- vend and consumption headline summaries
+- top tariff, area, feeder slices
+- quick exception counts
+
+### Consumer Explorer
+
+- search by consumer number or meter number
+- master profile
+- vend and consumption activity for the selected consumer
+- join and exception status
+- missing profile fields
+
+### Vending Analysis
+
+- vend amount distribution
+- top customers by vend amount and transaction count
+- daily or time-of-day analysis depending on `issuedate` quality
+- unmatched vend rows
+- top-up behaviour segments
+
+### Consumption Analysis
+
+- daily kWh trend
+- 7-day rolling average
+- customer usage distribution
+- top customers by average daily kWh
+- substation and voltage splits
+- suspicious zero / negative / missing consumption rows
+
+### Network / Spatial View
+
+- summaries by substation, feeder, DT, and area
+- GIS scatter when coordinate coverage is usable
+- fallback hierarchy tables when GIS quality is weak
+
+### Data Quality & Reconciliation
+
+This page remains prominent by design.
+
+It includes:
+
+- row counts by source
+- schema diagnostics
+- key duplication diagnostics
+- missing-value summaries
+- date parse summaries
+- numeric flags and outlier indicators
+- join coverage and resolution tables
+- unmatched vend and consumption populations
+- file-level ingest diagnostics
+- downloadable JSON export of quality and reconciliation outputs
 
 ## How to run
 
@@ -99,6 +160,12 @@ Run the app from the project root:
 streamlit run app/main.py
 ```
 
+Default load behavior:
+
+- prefer processed Parquet outputs when available
+- fall back to raw CSV ingestion when processed outputs are missing
+- use the sidebar `Refresh Raw Ingestion` button to rebuild Parquet outputs from raw files when those raw files are available locally
+
 Optional base directory override:
 
 ```powershell
@@ -112,172 +179,36 @@ $env:CFM_BASE_DIR = "F:/Secure/CashFlowMgmt"
 streamlit run app/main.py
 ```
 
-## Run tests
+## Tests
 
-Install dependencies (including test dependencies):
-
-```powershell
-pip install -r requirements.txt
-```
-
-Run the unit and smoke test suite from the project root:
+Install dependencies first, then run:
 
 ```powershell
 pytest
 ```
 
-## What the app does
+## Important assumptions
 
-On load, the app:
+- `ConsumerMaster20260401.csv` is the primary reference table.
+- Normalized `consumernumber` and normalized `meterno` are the only internal join keys used for reconciliation.
+- Raw source columns are preserved alongside normalized keys for diagnostics.
+- Business-friendly summaries are preferred over fragile visual complexity.
 
-1. discovers raw CSV files from the configured base directory
-2. standardises column names to lowercase snake case
-3. validates required columns using `config/schema_config.yaml`
-4. parses safe date fields and derives lightweight time features
-5. combines all vend files into one dataframe
-6. writes processed Parquet outputs to:
-   - `<base_dir>/data/processed/consumption.parquet`
-   - `<base_dir>/data/processed/vend.parquet`
-7. exposes exploratory pages for overview, consumption, vend, data quality, and future combined analysis
+## Data-quality caveats
 
-Date parsing is currently configured to interpret ambiguous values with month-first ordering, so `mm` and `dd` are effectively swapped relative to the earlier day-first setup.
+- Unmatched rows are surfaced rather than hidden.
+- Duplicate or conflicting master keys reduce resolution confidence.
+- Vend calendar charts are only shown when `issuedate` quality is safe enough.
+- Weak GIS, feeder, DT, tariff, or area coverage is treated as a real limitation and shown in the UI.
+- The exception layer is operational and descriptive. It is not a predictive risk model.
 
-## Dashboard pages
+## Key implementation files
 
-### Overview
-
-- file counts
-- row counts
-- date coverage where available
-- processed output paths
-- known limitations
-- ingest summary table
-
-### Consumption
-
-- summary KPIs
-- daily trends
-- distribution views
-- meter drill-down
-- raw filtered table with download button
-
-### Vend / Recharge
-
-- vend amount and transaction KPIs
-- transaction analysis
-- category breakdown
-- meter and service-point drill-down
-- source-file inspection
-- raw filtered table with download button
-- quality-aware filters for issuedate parse status and full-datetime-only views
-
-### Data Quality
-
-This page is intentionally prominent and should be reviewed early.
-
-It includes:
-
-- schema comparison
-- missing-value summary
-- duplicate counts
-- parse success and failure counts
-- numeric flags
-- outlier indicators
-- vend datetime warnings
-- column profiling
-- file-level diagnostics
-- duplicate diagnostics charts (by source file and by date)
-- schema-versioned JSON export of quality diagnostics with UTC timestamped filenames
-
-### Combined Analysis, Future
-
-This page is a placeholder only.
-
-It does not attempt a fake merge. Instead it documents:
-
-- why linked analysis is blocked today
-- what keys currently exist in each dataset
-- what future bridge artifacts would be needed
-- TODO items for future entity resolution and linked analysis
-
-## Assumptions
-
-- Consumption data currently contains fields such as `mtrid`, `midnightdate`, `kwh_abs`, `kvah_abs`, `kwh_consumption`, and `kvah_consumption`.
-- Vend data currently contains fields such as `servicepointno`, `meterno`, `categorycode`, `transactionamount`, and `issuedate`.
-- Vend file schemas are expected to remain aligned enough to concatenate after standardisation.
-- Future monthly CSV additions should continue to follow the configured filename patterns unless `config/app_config.yaml` is updated.
-
-## Known data limitations
-
-- There is currently no validated common key between consumption and vend data.
-- Consumption appears keyed by `mtrid`.
-- Vend data currently exposes `servicepointno` and `meterno`.
-- Combined analysis is intentionally blocked until a mapping table or validated bridge becomes available.
-- Vend `issuedate` may be incomplete or time-only in future extracts, so datetime handling remains provisional by design.
-- The dashboard currently avoids aggressive cleaning rules so stakeholders can see source-data limitations clearly.
-
-## Extending the project
-
-### Add future monthly files
-
-- Drop new CSV files into `<base_dir>/raw_data/`.
-- Keep filenames aligned with the configured patterns in `config/app_config.yaml`.
-- Refresh the app from the sidebar to re-run ingestion and regenerate Parquet outputs.
-
-### Extend schema handling
-
-- Update required or expected fields in [`config/schema_config.yaml`](/f:/Secure/CashFlowMgmt/config/schema_config.yaml).
-- Add any new parsing or derivation logic in [`src/transforms.py`](/f:/Secure/CashFlowMgmt/src/transforms.py).
-- Add new diagnostics in [`src/quality_checks.py`](/f:/Secure/CashFlowMgmt/src/quality_checks.py).
-
-### Configure quality thresholds and duplicate policy
-
-Quality controls are now config-driven through `config/app_config.yaml`.
-
-- `quality_checks.duplicate_policy.mode`
-   - `keep_all` (default): preserve duplicate rows and surface diagnostics
-   - `drop_first`: remove duplicate rows keeping first occurrence
-   - `drop_last`: remove duplicate rows keeping last occurrence
-   - `error`: preserve rows and add an explicit duplicate-policy warning
-- `quality_checks.thresholds.outlier_iqr_multiplier`
-   - controls IQR sensitivity for outlier indicators
-- `quality_checks.thresholds.temporal_max_future_days`
-   - flags rows with parsed dates outside the allowed future window
-- `quality_checks.thresholds.stale_data_warning_days`
-   - warns when latest parsed date appears stale
-- `quality_checks.thresholds.vend_full_datetime_warning_pct`
-   - warning threshold for vend full-datetime parse coverage (charts are still shown)
-
-Optional categorical allow-list checks can be configured per dataset in `config/schema_config.yaml` under `datasets.<name>.categorical_allow_lists`.
-
-### Change the base folder later
-
-- Prefer passing `--base-dir` when launching the app, or
-- set `CFM_BASE_DIR`, or
-- update `paths.default_base_dir` in [`config/app_config.yaml`](/f:/Secure/CashFlowMgmt/config/app_config.yaml)
-
-### Add future combined analysis
-
-When a validated linking asset becomes available, likely next steps are:
-
-- add a bridge table between `mtrid`, `meterno`, and `servicepointno`
-- create entity-resolution rules with documented confidence levels
-- define temporal alignment rules for vend and consumption events
-- build a linked analytical layer rather than merging raw source files directly
-- add targeted pages for recharge exhaustion, cashflow versus usage, and self-disconnection risk
-
-## Implementation notes
-
-- Path resolution is centralised in [`src/path_utils.py`](/f:/Secure/CashFlowMgmt/src/path_utils.py).
-- Ingestion and Parquet persistence live in [`src/io_utils.py`](/f:/Secure/CashFlowMgmt/src/io_utils.py).
-- Schema handling is centralised in [`src/schema_utils.py`](/f:/Secure/CashFlowMgmt/src/schema_utils.py).
-- Safe dataset transforms live in [`src/transforms.py`](/f:/Secure/CashFlowMgmt/src/transforms.py).
-- Data quality checks live in [`src/quality_checks.py`](/f:/Secure/CashFlowMgmt/src/quality_checks.py).
-- Streamlit pages stay intentionally thin by using the cached bundle in [`src/dashboard_data.py`](/f:/Secure/CashFlowMgmt/src/dashboard_data.py).
-
-## TODOs
-
-- Add richer anomaly rules once business thresholds are available.
-- Add support for bridge tables and validated entity resolution.
-- Add combined cashflow versus consumption analysis when linking is reliable.
-- Add recharge exhaustion and self-disconnection risk workflows after the data model evolves.
+- [`config/app_config.yaml`](/f:/Secure/CashFlowMgmt/config/app_config.yaml)
+- [`config/schema_config.yaml`](/f:/Secure/CashFlowMgmt/config/schema_config.yaml)
+- [`src/key_utils.py`](/f:/Secure/CashFlowMgmt/src/key_utils.py)
+- [`src/transforms.py`](/f:/Secure/CashFlowMgmt/src/transforms.py)
+- [`src/io_utils.py`](/f:/Secure/CashFlowMgmt/src/io_utils.py)
+- [`src/analytics.py`](/f:/Secure/CashFlowMgmt/src/analytics.py)
+- [`src/quality_checks.py`](/f:/Secure/CashFlowMgmt/src/quality_checks.py)
+- [`src/dashboard_data.py`](/f:/Secure/CashFlowMgmt/src/dashboard_data.py)
