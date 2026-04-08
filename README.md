@@ -57,7 +57,9 @@ F:\Secure\CashFlowMgmt\
 
 The dashboard expects CSV files under `<base_dir>/raw_data/`.
 
-Current sample files:
+These source files are intentionally local-only and are not committed to the repository. Add the required extracts under `raw_data/` when you want to ingest or refresh the dashboard inputs.
+
+Typical local files:
 
 - `Jan_consumption.csv`
 - `vend-01Jan-15Jan.csv`
@@ -67,6 +69,8 @@ Current sample files:
 The vend files are automatically discovered and combined into one unified vend dataset.
 
 The ingestion flow is also designed to tolerate future monthly file additions with minimal code change, especially for new CSVs that continue to match the configured filename patterns.
+
+Generated Parquet outputs under `<base_dir>/data/processed/` are also intentionally excluded from Git. The app can create or refresh those files locally during ingestion.
 
 ## Base directory precedence
 
