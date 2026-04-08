@@ -1,4 +1,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
-raw_data/*.csv
+raw_data/*
+!raw_data/.gitkeep
+data/processed/*
+!data/processed/.gitkeep

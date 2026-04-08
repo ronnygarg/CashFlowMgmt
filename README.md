@@ -19,6 +19,8 @@ The dashboard can now start from processed Parquet outputs in [`data/processed`]
 
 The dashboard is configured to look under `<base_dir>/raw_data/` and prefer these exact files when present:
 
+These source files are intentionally local-only and are not committed to the repository. Add the required extracts under `raw_data/` when you want to ingest or refresh the dashboard inputs.
+
 - `ConsumerMaster20260401.csv`
 - `VendData20260401.csv`
 - `ConsumptionData20260401.csv`
@@ -70,6 +72,10 @@ Join handling is intentionally conservative.
    - `unresolved`
 
 This means a row can show some key coverage without being silently assigned a high-confidence master record.
+
+Generated Parquet outputs under `<base_dir>/data/processed/` are also intentionally excluded from Git. The app can create or refresh those files locally during ingestion.
+
+## Base directory precedence
 
 ## Timestamp handling
 
