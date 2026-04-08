@@ -1,4 +1,4 @@
-"""Reusable metrics for dashboard pages."""
+"""Reusable metrics helpers for dashboard pages."""
 
 from __future__ import annotations
 
@@ -53,7 +53,8 @@ def consumption_metrics(df: pd.DataFrame) -> dict[str, Any]:
 
     return {
         "rows": int(len(df)),
-        "unique_meters": _safe_nunique(df, "mtrid"),
+        "unique_consumers": _safe_nunique(df, "consumernumber_normalized"),
+        "unique_meters": _safe_nunique(df, "meterno_normalized"),
         "total_kwh_consumption": _safe_sum(df, "kwh_consumption"),
         "total_kvah_consumption": _safe_sum(df, "kvah_consumption"),
         "average_daily_kwh": float(daily["kwh_consumption"].mean()) if not daily.empty else 0.0,
@@ -69,7 +70,7 @@ def vend_metrics(df: pd.DataFrame) -> dict[str, Any]:
     return {
         "rows": int(len(df)),
         "transactions": int(len(df)),
-        "unique_service_points": _safe_nunique(df, "servicepointno"),
+        "unique_consumers": _safe_nunique(df, "consumernumber_normalized"),
         "unique_meters": _safe_nunique(df, "meterno"),
         "total_transaction_amount": _safe_sum(df, "transactionamount"),
         "average_transaction_amount": _safe_mean(df, "transactionamount"),
@@ -89,4 +90,3 @@ def overview_metrics(consumption_df: pd.DataFrame, vend_df: pd.DataFrame, file_i
         "consumption": consumption_metrics(consumption_df),
         "vend": vend_metrics(vend_df),
     }
-

@@ -1,6 +1,12 @@
 import pandas as pd
 
-from src.constants import DATE_STATUS_MISSING, DATE_STATUS_PARSED, DATE_STATUS_TIME_ONLY, LIMITATION_VEND_DATETIME
+from src.constants import (
+    DATE_STATUS_DATE_ONLY,
+    DATE_STATUS_MISSING,
+    DATE_STATUS_PARSED,
+    DATE_STATUS_TIME_ONLY,
+    LIMITATION_VEND_DATETIME,
+)
 from src.quality_checks import (
     build_outlier_summary,
     build_parse_summary,
@@ -8,15 +14,17 @@ from src.quality_checks import (
 )
 
 
-def test_build_parse_summary_for_consumption() -> None:
-    df = pd.DataFrame({"midnightdate_parse_success": [True, False, True]})
+def test_build_parse_summary_for_consumer_master() -> None:
+    df = pd.DataFrame(
+        {
+            "meterinstallationdate_parse_status": [DATE_STATUS_DATE_ONLY, DATE_STATUS_DATE_ONLY],
+            "balanceupdatedon_parse_status": [DATE_STATUS_PARSED, DATE_STATUS_MISSING],
+        }
+    )
 
-    summary = build_parse_summary("consumption", df)
+    summary = build_parse_summary("consumer_master", df)
 
-    assert summary.set_index("status").to_dict()["count"] == {
-        "parsed_datetime": 2,
-        "failed_or_missing": 1,
-    }
+    assert set(summary["field"]) == {"meterinstallationdate", "balanceupdatedon"}
 
 
 def test_build_parse_summary_for_vend_uses_status_counts() -> None:
@@ -27,6 +35,7 @@ def test_build_parse_summary_for_vend_uses_status_counts() -> None:
                 DATE_STATUS_MISSING,
                 DATE_STATUS_MISSING,
                 DATE_STATUS_TIME_ONLY,
+                DATE_STATUS_DATE_ONLY,
             ]
         }
     )
@@ -37,6 +46,7 @@ def test_build_parse_summary_for_vend_uses_status_counts() -> None:
     assert counts[DATE_STATUS_MISSING] == 2
     assert counts[DATE_STATUS_PARSED] == 1
     assert counts[DATE_STATUS_TIME_ONLY] == 1
+    assert counts[DATE_STATUS_DATE_ONLY] == 1
 
 
 def test_build_outlier_summary_detects_extreme_values() -> None:
@@ -48,12 +58,13 @@ def test_build_outlier_summary_detects_extreme_values() -> None:
     assert float(summary["iqr_multiplier"].iloc[0]) == 1.5
 
 
-def test_run_dataset_quality_checks_reports_duplicates_and_warnings() -> None:
+def test_run_dataset_quality_checks_reports_duplicates_key_diagnostics_and_warnings() -> None:
     df = pd.DataFrame(
         {
-            "servicepointno": ["S1", "S1"],
+            "consumernumber": ["1001", "1001"],
+            "consumernumber_normalized": ["1001", "1001"],
             "meterno": ["M1", "M1"],
-            "categorycode": ["A", "A"],
+            "meterno_normalized": ["M1", "M1"],
             "transactionamount": ["10", "10"],
             "issuedate_parse_status": [DATE_STATUS_TIME_ONLY, DATE_STATUS_TIME_ONLY],
         }
@@ -61,7 +72,7 @@ def test_run_dataset_quality_checks_reports_duplicates_and_warnings() -> None:
     file_inventory = pd.DataFrame(
         {
             "dataset": ["vend"],
-            "file_name": ["vend-01Jan-15Jan.csv"],
+            "file_name": ["VendData20260401.csv"],
             "rows_read": [2],
             "column_count": [5],
             "schema_valid": [True],
@@ -73,7 +84,7 @@ def test_run_dataset_quality_checks_reports_duplicates_and_warnings() -> None:
     checks = run_dataset_quality_checks(
         dataset_name="vend",
         df=df,
-        schema={"required_columns": ["servicepointno", "meterno", "categorycode", "transactionamount"]},
+        schema={"required_columns": ["consumernumber", "meterno", "transactionamount"], "candidate_keys": ["consumernumber", "meterno"]},
         app_config={
             "data": {"known_limitations": ["Known limitation"]},
             "quality_checks": {
@@ -92,6 +103,4 @@ def test_run_dataset_quality_checks_reports_duplicates_and_warnings() -> None:
     assert LIMITATION_VEND_DATETIME in checks["warnings"]
     assert any("time-only" in warning for warning in checks["warnings"])
     assert not checks["file_diagnostics"].empty
-    assert "temporal_summary" in checks
-    assert "duplicate_diagnostics" in checks
-    assert "categorical_summary" in checks
+    assert not checks["key_diagnostics"].empty

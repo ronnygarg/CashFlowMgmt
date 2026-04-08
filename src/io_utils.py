@@ -10,7 +10,7 @@ from typing import Any, Callable, Mapping
 import pandas as pd
 
 from src.schema_utils import standardize_column_names, summarize_schema_report, validate_required_columns
-from src.transforms import empty_dataset_frame, transform_consumption, transform_vend
+from src.transforms import empty_dataset_frame, transform_consumer_master, transform_consumption, transform_vend
 
 
 TransformFunction = Callable[[pd.DataFrame, str, Mapping[str, Any], Mapping[str, Any]], pd.DataFrame]
@@ -30,6 +30,14 @@ FILE_INVENTORY_COLUMNS = [
     "column_mapping",
     "parse_warning_count",
 ]
+
+
+def processed_output_path(dataset_name: str, paths: Any, app_config: Mapping[str, Any]) -> Path:
+    """Resolve the processed Parquet path for a dataset."""
+
+    output_config = app_config.get("processed_outputs", {})
+    output_name = output_config.get(f"{dataset_name}_parquet", f"{dataset_name}.parquet")
+    return paths.processed_data_dir / output_name
 
 
 def _resolve_duplicate_policy(app_config: Mapping[str, Any]) -> str:
@@ -77,10 +85,20 @@ def discover_dataset_files(raw_data_dir: Path, app_config: Mapping[str, Any]) ->
     """Discover raw CSV files for each supported dataset."""
 
     patterns = app_config.get("supported_file_patterns", {})
+    configured_sources = app_config.get("source_files", {})
     discovered: dict[str, list[Path]] = {}
 
-    for dataset_name, file_patterns in patterns.items():
+    dataset_names = set(patterns) | set(configured_sources)
+    for dataset_name in dataset_names:
+        source_settings = configured_sources.get(dataset_name, {})
+        preferred_files = source_settings.get("preferred_filenames", [])
+        existing_preferred = [raw_data_dir / file_name for file_name in preferred_files if (raw_data_dir / file_name).exists()]
+        if existing_preferred:
+            discovered[dataset_name] = existing_preferred
+            continue
+
         matched_files: set[Path] = set()
+        file_patterns = source_settings.get("patterns", patterns.get(dataset_name, []))
         for pattern in file_patterns or []:
             matched_files.update(raw_data_dir.glob(pattern))
         discovered[dataset_name] = sorted(matched_files)
@@ -94,7 +112,15 @@ def read_csv_file(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, dtype=str)
 
 
+def read_parquet_file(path: Path) -> pd.DataFrame:
+    """Read a processed Parquet dataset."""
+
+    return pd.read_parquet(path)
+
+
 def _dataset_transformer(dataset_name: str) -> TransformFunction:
+    if dataset_name == "consumer_master":
+        return transform_consumer_master
     if dataset_name == "consumption":
         return transform_consumption
     if dataset_name == "vend":
@@ -143,7 +169,14 @@ def ingest_dataset_files(
                 }
             )
 
-            if dataset_name == "consumption":
+            if dataset_name == "consumer_master":
+                parse_warning_count = int(
+                    (
+                        (transformed_df["meterinstallationdate_parse_status"] == "failed")
+                        | (transformed_df["balanceupdatedon_parse_status"] == "failed")
+                    ).sum()
+                )
+            elif dataset_name == "consumption":
                 parse_warning_count = int((~transformed_df["midnightdate_parse_success"].fillna(False)).sum())
             else:
                 parse_warning_count = int((transformed_df["issuedate_parse_status"] != "parsed_datetime").sum())
@@ -203,6 +236,64 @@ def write_parquet(df: pd.DataFrame, output_path: Path) -> tuple[bool, str]:
         return False, f"Failed to write {output_path.name}: {exc}"
 
 
+def load_processed_datasets(
+    paths: Any,
+    app_config: Mapping[str, Any],
+    schema_config: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Load processed Parquet datasets when all expected outputs are available."""
+
+    dataset_schemas = schema_config.get("datasets", {})
+    dataset_names = app_config.get("data", {}).get("expected_datasets", list(dataset_schemas))
+    processed_paths = {
+        dataset_name: processed_output_path(dataset_name, paths, app_config)
+        for dataset_name in dataset_names
+    }
+
+    if not all(path.exists() for path in processed_paths.values()):
+        return None
+
+    datasets: dict[str, pd.DataFrame] = {}
+    file_records: list[dict[str, Any]] = []
+    messages = [
+        "Loaded datasets from processed Parquet outputs. Raw CSV files were not required for this session."
+    ]
+
+    for dataset_name, parquet_path in processed_paths.items():
+        dataset_df = read_parquet_file(parquet_path)
+        datasets[dataset_name] = dataset_df
+        file_records.append(
+            {
+                "dataset": dataset_name,
+                "file_name": parquet_path.name,
+                "file_path": str(parquet_path),
+                "file_size_mb": round(parquet_path.stat().st_size / (1024 * 1024), 2),
+                "read_status": "parquet_cache",
+                "rows_read": int(len(dataset_df)),
+                "column_count": int(len(dataset_df.columns)),
+                "raw_columns": "",
+                "standardized_columns": ", ".join(dataset_df.columns.astype(str).tolist()),
+                "schema_valid": True,
+                "missing_required_columns": "",
+                "schema_status": "Loaded from processed Parquet output",
+                "column_mapping": "",
+                "parse_warning_count": 0,
+                "duplicate_policy_mode": "from_cached_parquet",
+            }
+        )
+
+    file_inventory = pd.DataFrame(file_records)
+    return {
+        "paths": paths,
+        "datasets": datasets,
+        "file_inventory": file_inventory if not file_inventory.empty else pd.DataFrame(columns=FILE_INVENTORY_COLUMNS),
+        "messages": messages,
+        "processed_outputs": {dataset_name: str(path) for dataset_name, path in processed_paths.items()},
+        "discovered_files": {dataset_name: [] for dataset_name in dataset_names},
+        "load_mode": "processed_parquet",
+    }
+
+
 def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
     """Convert a dataframe to UTF-8 CSV bytes for download buttons."""
 
@@ -239,54 +330,56 @@ def ingest_and_persist(
     paths: Any,
     app_config: Mapping[str, Any],
     schema_config: Mapping[str, Any],
+    force_raw_refresh: bool = False,
 ) -> dict[str, Any]:
     """Run the end-to-end ingestion flow and persist processed Parquet outputs."""
+
+    if not force_raw_refresh:
+        processed_bundle = load_processed_datasets(paths=paths, app_config=app_config, schema_config=schema_config)
+        if processed_bundle is not None:
+            return processed_bundle
 
     dataset_schemas = schema_config.get("datasets", {})
     discovered_files = discover_dataset_files(paths.raw_data_dir, app_config)
     messages: list[str] = []
+    if force_raw_refresh:
+        messages.append("Forced raw ingestion requested. Rebuilding processed Parquet outputs from raw CSV files.")
+    else:
+        messages.append("Processed Parquet outputs were missing, so the app rebuilt them from raw CSV files.")
 
-    consumption_df, consumption_records, consumption_messages = ingest_dataset_files(
-        dataset_name="consumption",
-        file_paths=discovered_files.get("consumption", []),
-        dataset_schema=dataset_schemas.get("consumption", {}),
-        app_config=app_config,
-    )
-    vend_df, vend_records, vend_messages = ingest_dataset_files(
-        dataset_name="vend",
-        file_paths=discovered_files.get("vend", []),
-        dataset_schema=dataset_schemas.get("vend", {}),
-        app_config=app_config,
-    )
-
-    messages.extend(consumption_messages)
-    messages.extend(vend_messages)
-
+    dataset_names = app_config.get("data", {}).get("expected_datasets", list(dataset_schemas))
+    datasets: dict[str, pd.DataFrame] = {}
+    file_records: list[dict[str, Any]] = []
+    processed_outputs: dict[str, Any] = {}
     output_config = app_config.get("processed_outputs", {})
-    consumption_output = paths.processed_data_dir / output_config.get("consumption_parquet", "consumption.parquet")
-    vend_output = paths.processed_data_dir / output_config.get("vend_parquet", "vend.parquet")
 
-    consumption_write_ok, consumption_write_message = write_parquet(consumption_df, consumption_output)
-    vend_write_ok, vend_write_message = write_parquet(vend_df, vend_output)
-    messages.extend([consumption_write_message, vend_write_message])
+    for dataset_name in dataset_names:
+        dataset_df, dataset_records, dataset_messages = ingest_dataset_files(
+            dataset_name=dataset_name,
+            file_paths=discovered_files.get(dataset_name, []),
+            dataset_schema=dataset_schemas.get(dataset_name, {}),
+            app_config=app_config,
+        )
+        datasets[dataset_name] = dataset_df
+        file_records.extend(dataset_records)
+        messages.extend(dataset_messages)
 
-    file_inventory = pd.DataFrame(consumption_records + vend_records)
+        output_path = processed_output_path(dataset_name, paths, app_config)
+        write_ok, write_message = write_parquet(dataset_df, output_path)
+        processed_outputs[dataset_name] = str(output_path)
+        processed_outputs[f"{dataset_name}_write_ok"] = write_ok
+        messages.append(write_message)
+
+    file_inventory = pd.DataFrame(file_records)
     if file_inventory.empty:
         file_inventory = pd.DataFrame(columns=FILE_INVENTORY_COLUMNS)
 
     return {
         "paths": paths,
-        "datasets": {
-            "consumption": consumption_df,
-            "vend": vend_df,
-        },
+        "datasets": datasets,
         "file_inventory": file_inventory,
         "messages": messages,
-        "processed_outputs": {
-            "consumption": str(consumption_output),
-            "vend": str(vend_output),
-            "consumption_write_ok": consumption_write_ok,
-            "vend_write_ok": vend_write_ok,
-        },
+        "processed_outputs": processed_outputs,
         "discovered_files": {key: [str(path) for path in value] for key, value in discovered_files.items()},
+        "load_mode": "raw_ingestion",
     }

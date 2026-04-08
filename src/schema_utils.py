@@ -7,6 +7,8 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from src.key_utils import NULL_LIKE_TEXT
+
 
 def to_snake_case(value: str) -> str:
     """Convert column names to lowercase snake case."""
@@ -31,7 +33,8 @@ def trim_string_values(df: pd.DataFrame) -> pd.DataFrame:
     trimmed = df.copy()
     for column in trimmed.columns:
         if pd.api.types.is_object_dtype(trimmed[column]) or pd.api.types.is_string_dtype(trimmed[column]):
-            trimmed[column] = trimmed[column].astype("string").str.strip()
+            series = trimmed[column].astype("string").str.strip()
+            trimmed[column] = series.mask(series.str.lower().isin(NULL_LIKE_TEXT))
     return trimmed
 
 

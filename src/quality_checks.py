@@ -7,6 +7,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from src.constants import (
+    DATE_STATUS_DATE_ONLY,
     DATE_STATUS_MISSING,
     DATE_STATUS_PARSED,
     DATE_STATUS_TIME_ONLY,
@@ -42,16 +43,37 @@ def build_missing_value_summary(df: pd.DataFrame) -> pd.DataFrame:
 def build_parse_summary(dataset_name: str, df: pd.DataFrame) -> pd.DataFrame:
     """Summarise parse outcomes for configured date fields."""
 
+    if dataset_name == "consumer_master":
+        frames: list[pd.DataFrame] = []
+        for field_name, status_column in (
+            ("meterinstallationdate", "meterinstallationdate_parse_status"),
+            ("balanceupdatedon", "balanceupdatedon_parse_status"),
+        ):
+            if status_column not in df.columns:
+                continue
+            summary = (
+                df[status_column]
+                .fillna("unknown")
+                .value_counts(dropna=False)
+                .rename_axis("status")
+                .reset_index(name="count")
+            )
+            summary.insert(0, "field", field_name)
+            frames.append(summary)
+        if frames:
+            return pd.concat(frames, ignore_index=True)
+        return pd.DataFrame(columns=["field", "status", "count"])
+
     if dataset_name == "consumption":
-        total_rows = len(df)
-        success = int(df.get("midnightdate_parse_success", pd.Series(dtype="bool")).fillna(False).sum())
-        failed = max(total_rows - success, 0)
-        return pd.DataFrame(
-            [
-                {"status": DATE_STATUS_PARSED, "count": success},
-                {"status": "failed_or_missing", "count": failed},
-            ]
+        status_counts = (
+            df.get("midnightdate_parse_status", pd.Series(dtype="string"))
+            .fillna("unknown")
+            .value_counts(dropna=False)
+            .rename_axis("status")
+            .reset_index(name="count")
         )
+        status_counts.insert(0, "field", "midnightdate")
+        return status_counts
 
     if dataset_name == "vend":
         status_counts = (
@@ -61,9 +83,10 @@ def build_parse_summary(dataset_name: str, df: pd.DataFrame) -> pd.DataFrame:
             .rename_axis("status")
             .reset_index(name="count")
         )
+        status_counts.insert(0, "field", "issuedate")
         return status_counts
 
-    return pd.DataFrame(columns=["status", "count"])
+    return pd.DataFrame(columns=["field", "status", "count"])
 
 
 def build_numeric_flag_summary(df: pd.DataFrame, numeric_columns: list[str]) -> pd.DataFrame:
@@ -169,6 +192,7 @@ def build_quality_warnings(dataset_name: str, df: pd.DataFrame, app_config: Mapp
         time_only_count = int((status_series == DATE_STATUS_TIME_ONLY).sum())
         missing_count = int((status_series == DATE_STATUS_MISSING).sum())
         parsed_count = int((status_series == DATE_STATUS_PARSED).sum())
+        date_only_count = int((status_series == DATE_STATUS_DATE_ONLY).sum())
         total_rows = len(df)
         parsed_pct = (parsed_count / total_rows * 100) if total_rows else 0.0
         warning_threshold_pct = float(
@@ -181,6 +205,10 @@ def build_quality_warnings(dataset_name: str, df: pd.DataFrame, app_config: Mapp
         if time_only_count:
             warnings.append(
                 f"{time_only_count:,} vend records contain time-only issuedate values and cannot support full date analysis."
+            )
+        if date_only_count:
+            warnings.append(
+                f"{date_only_count:,} vend records contain date-only issuedate values and cannot support intraday timing analysis."
             )
         if missing_count:
             warnings.append(f"{missing_count:,} vend records have missing issuedate values.")
@@ -196,6 +224,8 @@ def build_quality_warnings(dataset_name: str, df: pd.DataFrame, app_config: Mapp
 
 
 def _dataset_date_column(dataset_name: str) -> str | None:
+    if dataset_name == "consumer_master":
+        return "balanceupdatedon_parsed"
     if dataset_name == "consumption":
         return "midnightdate_parsed"
     if dataset_name == "vend":
@@ -334,6 +364,30 @@ def build_categorical_validation_summary(df: pd.DataFrame, allow_lists: Mapping[
     return pd.DataFrame(records)
 
 
+def build_key_diagnostics(df: pd.DataFrame, key_columns: list[str]) -> pd.DataFrame:
+    """Summarize duplicate and non-null coverage for configured key columns."""
+
+    records: list[dict[str, Any]] = []
+    for column in key_columns:
+        normalized_column = f"{column}_normalized" if f"{column}_normalized" in df.columns else column
+        if normalized_column not in df.columns:
+            continue
+
+        series = df[normalized_column].astype("string").dropna()
+        duplicate_mask = series.duplicated(keep=False)
+        records.append(
+            {
+                "key_column": normalized_column,
+                "non_null_count": int(series.shape[0]),
+                "distinct_count": int(series.nunique(dropna=True)),
+                "duplicate_row_count": int(duplicate_mask.sum()),
+                "duplicate_key_count": int(series[duplicate_mask].nunique(dropna=True)),
+            }
+        )
+
+    return pd.DataFrame(records)
+
+
 def run_dataset_quality_checks(
     dataset_name: str,
     df: pd.DataFrame,
@@ -369,6 +423,7 @@ def run_dataset_quality_checks(
         df,
         categorical_allow_lists if isinstance(categorical_allow_lists, Mapping) else {},
     )
+    key_diagnostics = build_key_diagnostics(df, list(schema.get("candidate_keys", [])))
     column_profile = build_column_profile(df)
     duplicate_rows = int(df.duplicated().sum()) if not df.empty else 0
 
@@ -392,6 +447,12 @@ def run_dataset_quality_checks(
             warnings.append(
                 f"Categorical validation found {invalid_total:,} values outside configured allow-lists."
             )
+    if not key_diagnostics.empty and "duplicate_key_count" in key_diagnostics.columns:
+        duplicate_key_total = int(key_diagnostics["duplicate_key_count"].sum())
+        if duplicate_key_total > 0:
+            warnings.append(
+                f"Key diagnostics found {duplicate_key_total:,} duplicate normalized business keys across configured join columns."
+            )
 
     return {
         "schema_report": schema_report,
@@ -402,6 +463,7 @@ def run_dataset_quality_checks(
         "temporal_summary": temporal_summary,
         "duplicate_diagnostics": duplicate_diagnostics,
         "categorical_summary": categorical_summary,
+        "key_diagnostics": key_diagnostics,
         "column_profile": column_profile,
         "duplicate_rows": duplicate_rows,
         "warnings": list(dict.fromkeys(warnings)),
