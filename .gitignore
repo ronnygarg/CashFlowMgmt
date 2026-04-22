@@ -1,6 +1,21 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Local notebook and editor artifacts.
+.jupyter_config/
+notebooks/.ipynb_checkpoints/
+notebooks/.Rhistory
+
+# Generated analysis exports kept local unless intentionally force-added.
+/*.xlsx
+data/*.png
+data/*.xlsx
+notebooks/*_report*.html
+notebooks/*_report*.md
+notebooks/*_report*.pdf
+
+# Local data inputs and processed outputs.
 raw_data/*
 !raw_data/.gitkeep
 data/processed/*
