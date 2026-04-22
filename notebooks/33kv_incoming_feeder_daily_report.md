@@ -10,6 +10,8 @@ output:
 
 This report summarizes the analysis built in [33kv_incoming_feeder_daily_long_transform.ipynb](/f:/Secure/CashFlowMgmt/notebooks/33kv_incoming_feeder_daily_long_transform.ipynb).
 
+An extended comparison layer that adds Bihar scheduled-generation context is now available in [33kv_incoming_feeder_daily_report_extended.md](/f:/Secure/CashFlowMgmt/notebooks/33kv_incoming_feeder_daily_report_extended.md).
+
 Primary analysis window:
 
 - `2025-04-01` to `2026-03-31`
